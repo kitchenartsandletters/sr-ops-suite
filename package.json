@@ -1,0 +1,19 @@
+{
+  "name": "sr-ops-suite",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "node src/slack/app.js",
+    "webhook": "node src/webhooks/orders.js",
+    "backfill": "node src/backfill/index.js",
+    "job:aging": "node src/jobs/aging.js",
+    "job:batches": "node src/jobs/batches.js",
+    "job:digest": "node src/jobs/digest.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.3.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "shopify-api-node": "^3.3.0",
+    "pg": "^8.7.1"
+  }
+}
