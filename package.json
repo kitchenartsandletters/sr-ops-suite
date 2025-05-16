@@ -2,18 +2,19 @@
   "name": "sr-ops-suite",
   "version": "0.1.0",
   "scripts": {
-    "start": "node src/slack/app.js",
+    "start": "node src/index.js",
     "webhook": "node src/webhooks/orders.js",
     "backfill": "node src/backfill/index.js",
     "job:aging": "node src/jobs/aging.js",
     "job:batches": "node src/jobs/batches.js",
-    "job:digest": "node src/jobs/digest.js"
+    "job:digest": "node src/jobs/digest.js",
+    "migrate:schema-backorders": "psql \"$SR_DATABASE_URL\" -f scripts/schema-order-line-backorders.sql"
   },
   "dependencies": {
     "@slack/bolt": "^4.3.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "shopify-api-node": "^3.3.0",
-    "pg": "^8.7.1"
+    "pg": "^8.7.1",
+    "shopify-api-node": "^3.15.0"
   }
 }
