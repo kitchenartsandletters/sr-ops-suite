@@ -102,6 +102,7 @@ module.exports = function registerSlackCommands(slackApp) {
       if (!blocks) {
         return respond('✅ No open backorders at the moment!');
       }
+      console.log('Slash response_url:', body.response_url);
       await respond({ blocks });
     } catch (error) {
       console.error('Error fetching backorders:', error);
