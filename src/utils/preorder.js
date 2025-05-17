@@ -1,74 +1,57 @@
 // src/utils/preorder.js
 require('dotenv').config();
-const Shopify = require('shopify-api-node');
+const fetch = require('node-fetch');
 
-// Guarded Shopify client initialization
-const shopName = process.env.SR_SHOPIFY_SHOP;
-const accessToken = process.env.SR_SHOPIFY_ACCESS_TOKEN;
-let client = null;
+// GraphQL endpoint and headers
+const SHOP = process.env.SR_SHOPIFY_SHOP;
+const TOKEN = process.env.SR_SHOPIFY_ACCESS_TOKEN;
+const GRAPHQL_URL = `https://${SHOP}/admin/api/2025-01/graphql.json`;
+const HEADERS = {
+  "Content-Type": "application/json",
+  "X-Shopify-Access-Token": TOKEN
+};
 
-if (shopName && accessToken) {
-  client = new Shopify({ shopName, accessToken });
-} else {
-  console.warn('Missing SR_SHOPIFY_SHOP or SR_SHOPIFY_ACCESS_TOKEN; isPreorder will always return false.');
-}
-
-/**
- * Determines if a product is actively preorderable.
- * Checks for a 'preorder' tag and a future publication date metafield.
- * @param {number|string} productId - The Shopify product ID
- * @returns {Promise<boolean>} True if the product is an active preorder
- */
 async function isPreorder(productId) {
-  // Bail immediately if no valid productId
-  if (!productId || (typeof productId !== 'string' && typeof productId !== 'number')) {
-    return false;
-  }
-  // If Shopify client isn’t configured, skip preorder checks
-  if (!client) {
-    return false;
-  }
-  try {
-    // Fetch product data
-    const product = await client.product.get(productId);
-    // Normalize tags: Shopify returns a comma-separated string
-    const tagsString = product.tags || '';
-    const tags = tagsString.split(',').map(t => t.trim()).filter(Boolean);
-    const hasPreorderTag = tags.includes('preorder');
-
-    // Fetch publication date metafield
-    let pubDate;
-    const mfList = await client.metafield.list({
-      metafield: { owner_resource: 'product', owner_id: productId },
-      namespace: 'global',
-      key: 'pub_date'
-    });
-    if (Array.isArray(mfList) && mfList.length && mfList[0].value) {
-      pubDate = new Date(mfList[0].value);
-    }
-
-    // Fallback date from tags (MM-DD-YYYY)
-    if (!pubDate) {
-      const fallbackTag = tags.find(t => /^\d{2}-\d{2}-\d{4}$/.test(t));
-      if (fallbackTag) {
-        const [m, d, y] = fallbackTag.split('-').map(Number);
-        pubDate = new Date(y, m - 1, d);
+  if (!productId) return false;
+  const gid = `gid://shopify/Product/${productId}`;
+  const query = `
+    query productPreorderStatus($id: ID!) {
+      product(id: $id) {
+        tags
+        collections(first: 1, query: "handle:pre-order") {
+          edges { node { id } }
+        }
+        metafields(namespace: "custom", first: 1, keys: ["pub_date"]) {
+          edges { node { value } }
+        }
       }
     }
+  `;
+  const res = await fetch(GRAPHQL_URL, {
+    method: 'POST',
+    headers: HEADERS,
+    body: JSON.stringify({ query, variables: { id: gid } })
+  });
+  if (!res.ok) return false;
+  const { data } = await res.json();
+  if (!data || !data.product) return false;
 
-    // If tagged and pubDate is in the future in ET, it's a preorder
-    if (hasPreorderTag && pubDate) {
-      const nowET = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
-      if (new Date(nowET) < pubDate) {
-        return true;
-      }
-    }
+  const { tags = '', collections, metafields } = data.product;
+  const tagList = tags.split(',').map(t => t.trim().toLowerCase());
+  const hasTag = tagList.includes('preorder');
+  const inCollection = (collections.edges || []).length > 0;
 
-    return false;
-  } catch (err) {
-    console.error(`isPreorder error for product ${productId}:`, err);
-    return false;
+  // Parse pub_date value if present
+  let futurePub = false;
+  const mfEdge = (metafields.edges || [])[0];
+  if (mfEdge && mfEdge.node && mfEdge.node.value) {
+    const [m, d, y] = mfEdge.node.value.split('-').map(Number);
+    const pubDate = new Date(y, m - 1, d);
+    futurePub = pubDate > new Date();
   }
+
+  // At least two of three must be true
+  return [hasTag, inCollection, futurePub].filter(Boolean).length >= 2;
 }
 
 module.exports = { isPreorder };
