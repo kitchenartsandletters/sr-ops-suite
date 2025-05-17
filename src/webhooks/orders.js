@@ -53,6 +53,15 @@ router.post(
         const variant = await shopify.productVariant.get(variant_id);
         const inventoryItemId = variant.inventory_item_id;
 
+        // Fetch product to get vendor code
+        let productVendor = null;
+        try {
+          const product = await shopify.product.get(variant.product_id);
+          productVendor = product.vendor || null;
+        } catch (err) {
+          console.error(`Error fetching product ${variant.product_id} for vendor:`, err);
+        }
+
         // Use the variant’s barcode for productBarcode
         const productBarcode = variant.barcode || null;
 
@@ -69,8 +78,9 @@ router.post(
         await db.query(
           `INSERT INTO order_line_backorders
             (order_id, line_item_id, order_date, variant_id, ordered_qty, initial_available,
-             initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11)
+             initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode,
+             product_vendor)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12)
            ON CONFLICT (order_id, line_item_id) DO UPDATE SET
              initial_available   = EXCLUDED.initial_available,
              initial_backordered = EXCLUDED.initial_backordered,
@@ -79,7 +89,8 @@ router.post(
              order_date          = EXCLUDED.order_date,
              product_title       = EXCLUDED.product_title,
              product_sku         = EXCLUDED.product_sku,
-             product_barcode     = EXCLUDED.product_barcode;`,
+             product_barcode     = EXCLUDED.product_barcode,
+             product_vendor      = EXCLUDED.product_vendor;`,
           [
             order.name,
             line_item_id,
@@ -91,7 +102,8 @@ router.post(
             snapshotTs,
             productTitle,
             productSku,
-            productBarcode
+            productBarcode,
+            productVendor
           ]
         );
       }

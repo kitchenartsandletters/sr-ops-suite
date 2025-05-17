@@ -35,6 +35,7 @@ module.exports = function registerSlackCommands(slackApp) {
         product_title,
         product_sku,
         product_barcode,
+        product_vendor,
         ordered_qty,
         initial_available,
         initial_backordered,
@@ -63,6 +64,7 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*Date*  \n${new Date(row.order_date).toLocaleDateString()}` },
           { type: 'mrkdwn', text: `*Days Open*  \n${daysOpen}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
+          { type: 'mrkdwn', text: `*Vendor*  \n${row.product_vendor || 'Unknown'}` },
           { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
           { type: 'mrkdwn', text: `*Backordered*  \n${row.initial_backordered}` }
         ],
