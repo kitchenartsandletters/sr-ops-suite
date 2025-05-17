@@ -90,5 +90,30 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
+  // Bulk override backorders by ISBN
+  slackApp.command('/sr-fulfill-isbn', async ({ ack, body, respond }) => {
+    await ack();
+    const parts = body.text.trim().split(/\s+/);
+    const [isbn, ...reasonParts] = parts;
+    const overrideReason = reasonParts.join(' ') || null;
+
+    try {
+      const result = await db.query(
+        `UPDATE order_line_backorders
+           SET override_flag   = TRUE,
+               override_reason = $1,
+               override_ts     = NOW()
+         WHERE product_barcode = $2
+           AND status           = 'open'
+           AND override_flag    = FALSE`,
+        [overrideReason, isbn]
+      );
+      await respond(`✅ Bulk override applied to ISBN ${isbn}. Rows affected: ${result.rowCount}${overrideReason ? ` (${overrideReason})` : ''}`);
+    } catch (err) {
+      console.error('Error in bulk override by ISBN:', err);
+      await respond('❌ Failed to bulk override backorders by ISBN.');
+    }
+  });
+
   // Other commands can be added here...
 };
