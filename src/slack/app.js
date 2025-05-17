@@ -222,5 +222,37 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
+  // Handle "Mark Fulfilled" button clicks
+  slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
+    await ack();
+    try {
+      const [orderId, lineItemId] = body.actions[0].value.split('|');
+      // Update the backorder status to closed
+      await db.query(
+        `UPDATE order_line_backorders
+           SET status = 'closed',
+               override_flag = TRUE,
+               override_reason = 'Manually marked fulfilled',
+               override_ts = NOW()
+         WHERE order_id = $1
+           AND line_item_id = $2`,
+        [orderId, lineItemId]
+      );
+      // Rebuild the current page to reflect the removal
+      const currentPage = parseInt(body.actions[0].block_id || body.actions[0].valuePage, 10) || 1;
+      const { blocks, totalPages } = await buildBackordersBlocks(currentPage);
+      const channel = body.channel?.id || body.channel_id;
+      const ts = body.message?.ts || body.container?.message_ts;
+      await client.chat.update({
+        channel,
+        ts,
+        text: `Current Backorders (Page ${currentPage} of ${totalPages})`,
+        blocks
+      });
+    } catch (err) {
+      console.error('Error handling Mark Fulfilled:', err);
+    }
+  });
+
   // Other commands can be added here...
 };
