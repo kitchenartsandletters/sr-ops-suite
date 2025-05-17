@@ -103,7 +103,10 @@ module.exports = function registerSlackCommands(slackApp) {
         return respond('✅ No open backorders at the moment!');
       }
       console.log('Slash response_url:', body.response_url);
-      await respond({ blocks });
+      await respond({
+        text: `Current Backorders (Page ${page} of ${Math.ceil(total / PAGE_SIZE)})`,
+        blocks
+      });
     } catch (error) {
       console.error('Error fetching backorders:', error);
       await respond('❌ Sorry, I was unable to load backorders.');
@@ -121,7 +124,7 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.update({
         channel: body.channel.id,
         ts: body.message.ts,
-        text: '', // required fallback
+        text: `Current Backorders (Page ${page - 1})`,
         blocks
       });
     } catch (error) {
@@ -142,7 +145,7 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.update({
         channel: body.channel.id,
         ts: body.message.ts,
-        text: '',
+        text: `Current Backorders (Page ${page})`,
         blocks: blocksFinal
       });
     } catch (error) {
