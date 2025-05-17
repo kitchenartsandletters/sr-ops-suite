@@ -222,6 +222,84 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
+  /**
+   * List the last 10 manually fulfilled backorders for easy undo.
+   * Usage: /sr-fulfilled-list
+   */
+  slackApp.command('/sr-fulfilled-list', async ({ ack, body, respond }) => {
+    await ack();
+    try {
+      const res = await db.query(`
+        SELECT order_id, line_item_id, product_title, product_barcode, override_ts
+          FROM order_line_backorders
+         WHERE status = 'closed'
+           AND override_flag = TRUE
+           AND override_reason = 'Manually marked fulfilled'
+         ORDER BY override_ts DESC
+         LIMIT 10
+      `);
+      const rows = res.rows;
+      if (rows.length === 0) {
+        return await respond('No recently fulfilled backorders found.');
+      }
+      // Build numbered list
+      const lines = rows.map((r, i) =>
+        `*${i+1}.* Order ${r.order_id} – ${r.product_title} – ISBN ${r.product_barcode}`
+      );
+      lines.unshift('*Recently Fulfilled Backorders:*');
+      lines.push('\n_To undo:_ `/sr-undo <number> [reason]`');
+      await respond(lines.join('\n'));
+    } catch (err) {
+      console.error('Error listing fulfilled backorders:', err);
+      await respond('❌ Failed to list fulfilled backorders.');
+    }
+  });
+
+  /**
+   * Undo a manual fulfillment by index in the last 10 list.
+   * Usage: /sr-undo <index> [reason]
+   */
+  slackApp.command('/sr-undo', async ({ ack, body, respond }) => {
+    await ack();
+    const parts = body.text.trim().split(/\s+/);
+    const index = parseInt(parts[0], 10);
+    const reason = parts.slice(1).join(' ') || 'Undone via /sr-undo';
+    if (isNaN(index) || index < 1 || index > 10) {
+      return await respond('Please provide a valid item number between 1 and 10.');
+    }
+    try {
+      // Re-fetch the same last 10
+      const res = await db.query(`
+        SELECT order_id, line_item_id
+          FROM order_line_backorders
+         WHERE status = 'closed'
+           AND override_flag = TRUE
+           AND override_reason = 'Manually marked fulfilled'
+         ORDER BY override_ts DESC
+         LIMIT 10
+      `);
+      const row = res.rows[index - 1];
+      if (!row) {
+        return await respond('Could not find an entry to undo at that number.');
+      }
+      // Perform the undo update
+      await db.query(
+        `UPDATE order_line_backorders
+           SET status = 'open',
+               override_flag = FALSE,
+               override_reason = $1,
+               override_ts = NOW()
+         WHERE order_id = $2
+           AND line_item_id = $3`,
+        [reason, row.order_id, row.line_item_id]
+      );
+      await respond(`✅ Undo applied to Order ${row.order_id}/${row.line_item_id}. Reason: ${reason}`);
+    } catch (err) {
+      console.error('Error undoing fulfillment:', err);
+      await respond('❌ Failed to undo fulfillment.');
+    }
+  });
+
   // Handle "Mark Fulfilled" button clicks
   slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
     await ack();
