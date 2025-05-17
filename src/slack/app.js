@@ -122,9 +122,12 @@ module.exports = function registerSlackCommands(slackApp) {
     const page = prevPage >= 1 ? prevPage : 1;
     try {
       const { blocks } = await buildBackordersBlocks(page);
+      // Safely get channel and message timestamp
+      const channel = body.channel?.id || body.channel_id;
+      const ts = body.message?.ts || body.container?.message_ts;
       await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
+        channel,
+        ts,
         text: `Current Backorders (Page ${page - 1})`,
         blocks
       });
@@ -143,9 +146,12 @@ module.exports = function registerSlackCommands(slackApp) {
       // If user tried to go past last page, just stay at last
       const page = nextPage > totalPages ? totalPages : nextPage;
       const { blocks: blocksFinal } = await buildBackordersBlocks(page);
+      // Safely get channel and message timestamp
+      const channel = body.channel?.id || body.channel_id;
+      const ts = body.message?.ts || body.container?.message_ts;
       await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
+        channel,
+        ts,
         text: `Current Backorders (Page ${page})`,
         blocks: blocksFinal
       });
