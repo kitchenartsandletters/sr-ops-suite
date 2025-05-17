@@ -1,6 +1,7 @@
 // src/slack/app.js
 require('dotenv').config();
 const { Pool } = require('pg');
+const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
 const PAGE_SIZE = 10;
@@ -10,6 +11,8 @@ const PAGE_SIZE = 10;
  * @param {import('@slack/bolt').App} slackApp
  */
 module.exports = function registerSlackCommands(slackApp) {
+  const client = slackApp.client;
+
   // Helper to build paginated backorders blocks
   async function buildBackordersBlocks(page) {
     // Get total count
@@ -91,26 +94,34 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // Backorders report (paginated)
-  slackApp.command('/sr-backorders', async ({ ack, respond, body }) => {
+  slackApp.command('/sr-backorders', async ({ ack, body }) => {
     await ack();
     console.log('Using paginated /sr-backorders, page:', Math.max(1, parseInt(body.text.trim(), 10) || 1));
     const page = Math.max(1, parseInt(body.text.trim(), 10) || 1);
     try {
       const { blocks, total } = await buildBackordersBlocks(page);
       if (!blocks) {
-        return respond('✅ No open backorders at the moment!');
+        return await client.chat.postMessage({
+          channel: body.channel_id,
+          text: '✅ No open backorders at the moment!'
+        });
       }
       console.log('Slash response_url:', body.response_url);
       console.log('Debug: blocks count =', blocks.length);
       console.log('Sample block JSON:', JSON.stringify(blocks[2], null, 2));
       console.dir(blocks.slice(0, 3), { depth: 2 });
-      await respond({
+      // Post as a regular message so we can update it later
+      await client.chat.postMessage({
+        channel: body.channel_id,
         text: `Current Backorders (Page ${page} of ${Math.ceil(total / PAGE_SIZE)})`,
         blocks
       });
     } catch (error) {
       console.error('Error fetching backorders:', error);
-      await respond('❌ Sorry, I was unable to load backorders.');
+      await client.chat.postMessage({
+        channel: body.channel_id,
+        text: '❌ Sorry, I was unable to load backorders.'
+      });
     }
   });
 
