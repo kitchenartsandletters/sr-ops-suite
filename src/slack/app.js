@@ -95,6 +95,7 @@ module.exports = function registerSlackCommands(slackApp) {
   // Backorders report (paginated)
   slackApp.command('/sr-backorders', async ({ ack, respond, body }) => {
     await ack();
+    console.log('Using paginated /sr-backorders, page:', Math.max(1, parseInt(body.text.trim(), 10) || 1));
     const page = Math.max(1, parseInt(body.text.trim(), 10) || 1);
     try {
       const { blocks, total } = await buildBackordersBlocks(page);
