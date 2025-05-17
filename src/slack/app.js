@@ -1,58 +1,94 @@
 // src/slack/app.js
 require('dotenv').config();
-const { App, ExpressReceiver } = require('@slack/bolt');
+const { Pool } = require('pg');
+const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
-console.log('BOT TOKEN:', process.env.SR_SLACK_BOT_TOKEN ? '✅ loaded' : '❌ missing');
-
-// Create a receiver for Slack events
-const receiver = new ExpressReceiver({
-  signingSecret: process.env.SR_SLACK_SIGNING_SECRET,
-  endpoints: '/slack/events'
-});
-
-// Initialize Bolt App with the receiver
-const app = new App({
-  token: process.env.SR_SLACK_BOT_TOKEN,
-  receiver
-});
-
-// Example slash command
-app.command('/sr-backorders', async ({ ack, respond }) => {
-  await ack();
-  await respond('Here are your backorders...');
-});
-
-// Update ETA command
-app.command('/sr-update-eta', async ({ ack, body, respond }) => {
-  await ack();
-  // body.text contains arguments, e.g. "<order_id> YYYY-MM-DD"
-  await respond(`Updating ETA for backorder: ${body.text}`);
-});
-
-// Fulfill Backorder command
-app.command('/sr-fulfill-backorder', async ({ ack, body, respond }) => {
-  await ack();
-  // body.text contains order identifier
-  await respond(`Marking backorder as fulfilled: ${body.text}`);
-});
-
-// Create a hold request
-app.command('/sr-hold-create', async ({ ack, body, respond }) => {
+/**
+ * Registers Slack command and event handlers on the given Bolt App instance.
+ * @param {import('@slack/bolt').App} slackApp
+ */
+module.exports = function registerSlackCommands(slackApp) {
+  // Backorders report
+  slackApp.command('/sr-backorders', async ({ ack, respond }) => {
     await ack();
-    // body.text contains order identifier
-    await respond(`Creating hold request for: ${body.text}`);
-});
+    try {
+      const result = await db.query(`
+        SELECT 
+          order_id,
+          product_title,
+          product_sku,
+          product_barcode,
+          ordered_qty,
+          initial_available,
+          initial_backordered
+        FROM order_line_backorders
+        WHERE status = 'open'
+          AND override_flag = FALSE
+          AND initial_available < 0
+        ORDER BY initial_backordered DESC, initial_available ASC
+        LIMIT 50
+      `);
+      const rows = result.rows;
+      // Only show up to MAX_DISPLAY entries to avoid Slack block limits
+      const MAX_DISPLAY = 25;
+      const displayRows = rows.slice(0, MAX_DISPLAY);
+      if (rows.length === 0) {
+        return respond('✅ No open backorders at the moment!');
+      }
+      const blocks = [
+        { type: 'section', text: { type: 'mrkdwn', text: '*Current Backorders*' } },
+        { type: 'divider' }
+      ];
+      for (const row of displayRows) {
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Order:* ${row.order_id} • *Title:* ${row.product_title} • *Author:* ${row.product_sku}\n• *ISBN:* ${row.product_barcode} • Ordered: ${row.ordered_qty}\n• Available: ${row.initial_available}\n• Backordered: ${row.initial_backordered}`
+          }
+        });
+      }
+      if (rows.length > MAX_DISPLAY) {
+        blocks.push({
+          type: 'context',
+          elements: [
+            { type: 'mrkdwn', text: `Showing ${MAX_DISPLAY} of ${rows.length} backorders. Narrow your query or use pagination.` }
+          ]
+        });
+      }
+      await respond({ blocks });
+    } catch (error) {
+      console.error('Error fetching backorders:', error);
+      await respond('❌ Sorry, I was unable to load backorders.');
+    }
+  });
 
-// List hold requests
-app.command('/sr-holds', async ({ ack, body, respond }) => {
+  // Override backorder status
+  slackApp.command('/sr-override', async ({ ack, body, respond }) => {
     await ack();
-    // body.text contains order identifier
-    await respond(`Listing hold requests for: ${body.text}`);
-});
+    const parts = body.text.trim().split(/\s+/);
+    const [orderId, lineItemId, action, ...reasonParts] = parts;
+    const overrideFlag = action === 'clear';
+    const overrideReason = reasonParts.join(' ') || null;
+    try {
+      await db.query(
+        `UPDATE order_line_backorders
+           SET override_flag = $1,
+               override_reason = $2,
+               override_ts = NOW()
+         WHERE order_id = $3
+           AND line_item_id = $4`,
+        [overrideFlag, overrideReason, orderId, lineItemId]
+      );
+      const verb = overrideFlag ? 'cleared' : 'set';
+      await respond({
+        text: `Override ${verb} for Order ${orderId}, Item ${lineItemId}${overrideReason ? `: ${overrideReason}` : ''}`
+      });
+    } catch (err) {
+      console.error('Error overriding backorder:', err);
+      await respond('❌ Unable to apply override.');
+    }
+  });
 
-// Start the app
-(async () => {
-  const port = process.env.PORT || 3001;
-  await app.start(port);
-  console.log(`⚡️ Slack Bolt app running on port ${port}`);
-})();
+  // Other commands can be added here...
+};

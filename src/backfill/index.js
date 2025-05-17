@@ -1,4 +1,4 @@
-  /**
+/**
    * backfill/index.js
    *
    * One‑off script to seed existing backorders into the database.
@@ -22,6 +22,7 @@
       throw err;
     }
   }
+
 
   // Sanity check for Shopify credentials
   if (!process.env.SR_SHOPIFY_SHOP || !process.env.SR_SHOPIFY_ACCESS_TOKEN) {
@@ -47,21 +48,44 @@ const db = new Pool({
   async function processOrder(order) {
     const snapshotTs = new Date().toISOString();
     for (const item of order.line_items) {
-      const orderId = order.id.toString();
+      const orderId = order.name;
       const lineItemId = item.id.toString();
       const variantId = item.variant_id;
+      // Skip if no valid variantId
+      if (!variantId) {
+        console.warn(`Skipping line item ${lineItemId} in order ${orderId} due to missing variantId`);
+        continue;
+      }
       const orderedQty = item.quantity;
 
+      const productTitle = item.title;
+      const productSku   = item.sku || item.barcode || null;
+      // const productBarcode = item.barcode || null;
+
       // Fetch inventory_item_id
-      const variant = await retryWithBackoff(() => shopify.productVariant.get(variantId));
+      let variant;
+      try {
+        variant = await retryWithBackoff(() => shopify.productVariant.get(variantId));
+      } catch (err) {
+        console.error(`Error fetching variant ${variantId} for order ${orderId}:`, err);
+        continue;
+      }
       const inventoryItemId = variant.inventory_item_id;
+      // Use the variant’s barcode for the product barcode
+      const productBarcode = variant.barcode || null;
 
       // Fetch current available inventory
-      const levels = await retryWithBackoff(() =>
-        shopify.inventoryLevel.list({
-          inventory_item_ids: inventoryItemId.toString()
-        })
-      );
+      let levels;
+      try {
+        levels = await retryWithBackoff(() =>
+          shopify.inventoryLevel.list({
+            inventory_item_ids: inventoryItemId.toString()
+          })
+        );
+      } catch (err) {
+        console.error(`Error fetching inventory for item ${lineItemId} (variant ${variantId}):`, err);
+        continue;
+      }
       const initialAvailable = levels.reduce((sum, lvl) => sum + (lvl.available || 0), 0);
 
       // Calculate initial backordered quantity
@@ -69,15 +93,43 @@ const db = new Pool({
 
       // Upsert into order_line_backorders
       await db.query(
-        `INSERT INTO order_line_backorders
-          (order_id, line_item_id, variant_id, ordered_qty, initial_available, initial_backordered, snapshot_ts, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')
-         ON CONFLICT (order_id, line_item_id) DO UPDATE SET
-           initial_available   = EXCLUDED.initial_available,
-           initial_backordered = EXCLUDED.initial_backordered,
-           snapshot_ts         = EXCLUDED.snapshot_ts,
-           status              = 'open';`,
-        [orderId, lineItemId, variantId, orderedQty, initialAvailable, initialBackordered, snapshotTs]
+        `
+        INSERT INTO order_line_backorders (
+          order_id,
+          line_item_id,
+          variant_id,
+          ordered_qty,
+          initial_available,
+          initial_backordered,
+          snapshot_ts,
+          status,
+          product_title,
+          product_sku,
+          product_barcode
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, 'open', $8, $9, $10
+        )
+        ON CONFLICT (order_id, line_item_id) DO UPDATE SET
+          initial_available   = EXCLUDED.initial_available,
+          initial_backordered = EXCLUDED.initial_backordered,
+          snapshot_ts         = EXCLUDED.snapshot_ts,
+          status              = 'open',
+          product_title       = EXCLUDED.product_title,
+          product_sku         = EXCLUDED.product_sku,
+          product_barcode     = EXCLUDED.product_barcode;
+        `,
+        [
+          orderId,
+          lineItemId,
+          variantId,
+          orderedQty,
+          initialAvailable,
+          initialBackordered,
+          snapshotTs,
+          productTitle,
+          productSku,
+          productBarcode
+        ]
       );
       console.log(`Backfilled snapshot for Order ${orderId}, Item ${lineItemId}: backordered=${initialBackordered}, available=${initialAvailable}`);
       await sleep(300);
@@ -86,23 +138,27 @@ const db = new Pool({
 
   // Main backfill function
   async function backfillBackorders() {
-    let params = {
-      status: 'open',
-      limit: 250,
-      created_at_min: process.env.SR_BACKFILL_START_DATE
-    };
+   // Step 1: Fetch all orders within the date range
+   let allOrders = [];
+   let params = {
+     status: 'open',
+     limit: 250,
+     created_at_min: process.env.SR_BACKFILL_START_DATE
+   };
+   do {
+     const orders = await shopify.order.list(params);
+     allOrders = allOrders.concat(orders);
+     params = orders.nextPageParameters;
+   } while (params);
 
-    do {
-      const orders = await shopify.order.list(params);
-      for (const order of orders) {
-        await processOrder(order);
-        await sleep(1000);
-      }
-      params = orders.nextPageParameters;
-    } while (params);
+   // Process all orders without preorder filtering
+   for (const order of allOrders) {
+     await processOrder(order);
+     await sleep(1000);
+   }
 
-    console.log('Backfill complete.');
-    process.exit(0);
+   console.log('Backfill complete.');
+   process.exit(0);
   }
 
   // Test Shopify connection

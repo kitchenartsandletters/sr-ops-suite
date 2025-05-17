@@ -34,9 +34,8 @@ app.use(slackReceiver.router);
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// TODO: Mount additional routers, e.g.:
-// const slackApp = require('./slack/app');
-// app.use('/slack/events', slackApp);
+// Mount Slack command and event handlers
+require('./slack/app')(slackApp);
 
 // Start server
 const PORT = process.env.PORT || 3001;

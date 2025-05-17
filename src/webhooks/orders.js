@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { verifyShopifyWebhook } = require('../utils/verify-shopify-webhook');
+const { isPreorder } = require('../utils/preorder');
 const Shopify = require('shopify-api-node');
 const { Pool } = require('pg');
 
@@ -29,11 +30,22 @@ router.post(
       const snapshotTs = new Date().toISOString();
 
       for (const item of order.line_items) {
+        // Skip active preorder products
+        if (await isPreorder(item.product_id)) {
+          console.log(`Skipping preorder item for Order ${order.name}, Product ${item.product_id}`);
+          continue;
+        }
         const { id: line_item_id, variant_id, quantity: ordered_qty } = item;
+
+        const productTitle = item.title;
+        const productSku   = item.sku || item.barcode || null;
 
         // Fetch inventory_item_id via variant
         const variant = await shopify.productVariant.get(variant_id);
         const inventoryItemId = variant.inventory_item_id;
+
+        // Use the variant’s barcode for productBarcode
+        const productBarcode = variant.barcode || null;
 
         // Fetch current available inventory
         const levels = await shopify.inventoryLevel.list({
@@ -47,14 +59,19 @@ router.post(
         // Upsert into order_line_backorders
         await db.query(
           `INSERT INTO order_line_backorders
-            (order_id, line_item_id, variant_id, ordered_qty, initial_available, initial_backordered, snapshot_ts, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'open')
+            (order_id, line_item_id, variant_id, ordered_qty, initial_available,
+             initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,$10)
            ON CONFLICT (order_id, line_item_id) DO UPDATE SET
              initial_available   = EXCLUDED.initial_available,
              initial_backordered = EXCLUDED.initial_backordered,
              snapshot_ts         = EXCLUDED.snapshot_ts,
-             status              = 'open';`,
-          [order.name, line_item_id, variant_id, ordered_qty, initial_available, initial_backordered, snapshotTs]
+             status              = 'open',
+             product_title       = EXCLUDED.product_title,
+             product_sku         = EXCLUDED.product_sku,
+             product_barcode     = EXCLUDED.product_barcode;`,
+          [order.name, line_item_id, variant_id, ordered_qty, initial_available,
+           initial_backordered, snapshotTs, productTitle, productSku, productBarcode]
         );
       }
 
