@@ -115,14 +115,19 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // Navigate to previous page
-  slackApp.action('backorders_prev', async ({ ack, body }) => {
+  slackApp.action('backorders_prev', async ({ ack, body, client }) => {
+    await ack();
     const currentPage = parseInt(body.actions[0].value, 10);
     const prevPage = currentPage - 1;
     const page = prevPage >= 1 ? prevPage : 1;
     try {
       const { blocks } = await buildBackordersBlocks(page);
-      await ack({
-        response_action: 'update',
+      // Safely get channel and message timestamp
+      const channel = body.channel?.id || body.channel_id;
+      const ts = body.message?.ts || body.container?.message_ts;
+      await client.chat.update({
+        channel,
+        ts,
         text: `Current Backorders (Page ${page})`,
         blocks
       });
@@ -132,16 +137,20 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // Navigate to next page
-  slackApp.action('backorders_next', async ({ ack, body }) => {
+  slackApp.action('backorders_next', async ({ ack, body, client }) => {
+    await ack();
     const currentPage = parseInt(body.actions[0].value, 10);
     const nextPage = currentPage + 1;
     try {
       const { blocks, totalPages } = await buildBackordersBlocks(nextPage);
-      // If user tried to go past last page, just stay at last
       const page = nextPage > totalPages ? totalPages : nextPage;
       const { blocks: blocksFinal } = await buildBackordersBlocks(page);
-      await ack({
-        response_action: 'update',
+      // Safely get channel and message timestamp
+      const channel = body.channel?.id || body.channel_id;
+      const ts = body.message?.ts || body.container?.message_ts;
+      await client.chat.update({
+        channel,
+        ts,
         text: `Current Backorders (Page ${page})`,
         blocks: blocksFinal
       });
