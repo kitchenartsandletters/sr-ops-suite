@@ -2,11 +2,16 @@
 require('dotenv').config();
 const Shopify = require('shopify-api-node');
 
-// Initialize Shopify client
-const client = new Shopify({
-  shopName:    process.env.SR_SHOPIFY_SHOP,
-  accessToken: process.env.SR_SHOPIFY_ACCESS_TOKEN
-});
+// Guarded Shopify client initialization
+const shopName = process.env.SR_SHOPIFY_SHOP;
+const accessToken = process.env.SR_SHOPIFY_ACCESS_TOKEN;
+let client = null;
+
+if (shopName && accessToken) {
+  client = new Shopify({ shopName, accessToken });
+} else {
+  console.warn('Missing SR_SHOPIFY_SHOP or SR_SHOPIFY_ACCESS_TOKEN; isPreorder will always return false.');
+}
 
 /**
  * Determines if a product is actively preorderable.
@@ -17,6 +22,10 @@ const client = new Shopify({
 async function isPreorder(productId) {
   // Bail immediately if no valid productId
   if (!productId || (typeof productId !== 'string' && typeof productId !== 'number')) {
+    return false;
+  }
+  // If Shopify client isn’t configured, skip preorder checks
+  if (!client) {
     return false;
   }
   try {
