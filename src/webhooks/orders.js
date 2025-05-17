@@ -30,8 +30,16 @@ router.post(
       const snapshotTs = new Date().toISOString();
 
       for (const item of order.line_items) {
-        // Skip active preorder products
-        if (await isPreorder(item.product_id)) {
+        // Determine if this is a preorder; skip if so, but guard against errors
+        let skipPreorder = false;
+        try {
+          skipPreorder = await isPreorder(item.product_id);
+        } catch (err) {
+          console.error(`isPreorder error for product ${item.product_id}:`, err);
+          // On error, treat as non-preorder to ensure processing continues
+          skipPreorder = false;
+        }
+        if (skipPreorder) {
           console.log(`Skipping preorder item for Order ${order.name}, Product ${item.product_id}`);
           continue;
         }
