@@ -76,16 +76,14 @@ module.exports = function registerSlackCommands(slackApp) {
           text: { type: 'plain_text', text: '◀ Previous' },
           action_id: 'backorders_prev',
           value: String(page),
-          style: 'primary',
-          disabled: page <= 1
+          style: 'primary'
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: 'Next ▶' },
           action_id: 'backorders_next',
           value: String(page),
-          style: 'primary',
-          disabled: page >= totalPages
+          style: 'primary'
         }
       ]
     });
