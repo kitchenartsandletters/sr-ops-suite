@@ -104,6 +104,7 @@ module.exports = function registerSlackCommands(slackApp) {
       }
       console.log('Slash response_url:', body.response_url);
       console.log('Debug: blocks count =', blocks.length);
+      console.log('Sample block JSON:', JSON.stringify(blocks[2], null, 2));
       console.dir(blocks.slice(0, 3), { depth: 2 });
       await respond({
         text: `Current Backorders (Page ${page} of ${Math.ceil(total / PAGE_SIZE)})`,
