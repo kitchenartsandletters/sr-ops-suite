@@ -31,6 +31,7 @@ module.exports = function registerSlackCommands(slackApp) {
     const dataRes = await db.query(`
       SELECT
         order_id,
+        order_date,
         product_title,
         product_sku,
         product_barcode,
@@ -53,10 +54,14 @@ module.exports = function registerSlackCommands(slackApp) {
       { type: 'divider' }
     ];
     for (const row of rows) {
+      // compute days open
+      const daysOpen = Math.floor((Date.now() - new Date(row.order_date).getTime()) / (1000*60*60*24));
       blocks.push({
         type: 'section',
         fields: [
           { type: 'mrkdwn', text: `*Order*  \n${row.order_id}` },
+          { type: 'mrkdwn', text: `*Date*  \n${new Date(row.order_date).toLocaleDateString()}` },
+          { type: 'mrkdwn', text: `*Days Open*  \n${daysOpen}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
           { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
           { type: 'mrkdwn', text: `*Backordered*  \n${row.initial_backordered}` }

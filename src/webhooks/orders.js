@@ -27,6 +27,7 @@ router.post(
   async (req, res) => {
     try {
       const order = JSON.parse(req.body.toString());
+      const orderDate = order.created_at;  // ISO timestamp when the order was placed
       const snapshotTs = new Date().toISOString();
 
       for (const item of order.line_items) {
@@ -67,19 +68,31 @@ router.post(
         // Upsert into order_line_backorders
         await db.query(
           `INSERT INTO order_line_backorders
-            (order_id, line_item_id, variant_id, ordered_qty, initial_available,
+            (order_id, line_item_id, order_date, variant_id, ordered_qty, initial_available,
              initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,$10)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11)
            ON CONFLICT (order_id, line_item_id) DO UPDATE SET
              initial_available   = EXCLUDED.initial_available,
              initial_backordered = EXCLUDED.initial_backordered,
              snapshot_ts         = EXCLUDED.snapshot_ts,
              status              = 'open',
+             order_date          = EXCLUDED.order_date,
              product_title       = EXCLUDED.product_title,
              product_sku         = EXCLUDED.product_sku,
              product_barcode     = EXCLUDED.product_barcode;`,
-          [order.name, line_item_id, variant_id, ordered_qty, initial_available,
-           initial_backordered, snapshotTs, productTitle, productSku, productBarcode]
+          [
+            order.name,
+            line_item_id,
+            orderDate,
+            variant_id,
+            ordered_qty,
+            initial_available,
+            initial_backordered,
+            snapshotTs,
+            productTitle,
+            productSku,
+            productBarcode
+          ]
         );
       }
 

@@ -49,6 +49,7 @@ const db = new Pool({
     const snapshotTs = new Date().toISOString();
     for (const item of order.line_items) {
       const orderId = order.name;
+      const orderDate = order.created_at; // ISO timestamp string
       const lineItemId = item.id.toString();
       const variantId = item.variant_id;
       // Skip if no valid variantId
@@ -97,6 +98,7 @@ const db = new Pool({
         INSERT INTO order_line_backorders (
           order_id,
           line_item_id,
+          order_date,
           variant_id,
           ordered_qty,
           initial_available,
@@ -107,13 +109,14 @@ const db = new Pool({
           product_sku,
           product_barcode
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, 'open', $8, $9, $10
+          $1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, $11
         )
         ON CONFLICT (order_id, line_item_id) DO UPDATE SET
           initial_available   = EXCLUDED.initial_available,
           initial_backordered = EXCLUDED.initial_backordered,
           snapshot_ts         = EXCLUDED.snapshot_ts,
           status              = 'open',
+          order_date          = EXCLUDED.order_date,
           product_title       = EXCLUDED.product_title,
           product_sku         = EXCLUDED.product_sku,
           product_barcode     = EXCLUDED.product_barcode;
@@ -121,6 +124,7 @@ const db = new Pool({
         [
           orderId,
           lineItemId,
+          orderDate,
           variantId,
           orderedQty,
           initialAvailable,
