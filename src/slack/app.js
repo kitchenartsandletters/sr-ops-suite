@@ -3,63 +3,148 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
+const PAGE_SIZE = 10;
+
 /**
  * Registers Slack command and event handlers on the given Bolt App instance.
  * @param {import('@slack/bolt').App} slackApp
  */
 module.exports = function registerSlackCommands(slackApp) {
-  // Backorders report
-  slackApp.command('/sr-backorders', async ({ ack, respond }) => {
-    await ack();
-    try {
-      const result = await db.query(`
-        SELECT 
-          order_id,
-          product_title,
-          product_sku,
-          product_barcode,
-          ordered_qty,
-          initial_available,
-          initial_backordered
+  // Helper to build paginated backorders blocks
+  async function buildBackordersBlocks(page) {
+    // Get total count
+    const countRes = await db.query(`
+      SELECT COUNT(*) AS total
         FROM order_line_backorders
-        WHERE status = 'open'
-          AND override_flag = FALSE
-          AND initial_available < 0
-        ORDER BY initial_backordered DESC, initial_available ASC
-        LIMIT 50
-      `);
-      const rows = result.rows;
-      // Only show up to MAX_DISPLAY entries to avoid Slack block limits
-      const MAX_DISPLAY = 25;
-      const displayRows = rows.slice(0, MAX_DISPLAY);
-      if (rows.length === 0) {
+       WHERE status = 'open'
+         AND override_flag = FALSE
+         AND initial_available < 0
+    `);
+    const total = parseInt(countRes.rows[0].total, 10);
+    if (total === 0) {
+      return { blocks: null, totalPages: 1, total };
+    }
+    const offset = (page - 1) * PAGE_SIZE;
+    const dataRes = await db.query(`
+      SELECT
+        order_id,
+        product_title,
+        product_sku,
+        product_barcode,
+        ordered_qty,
+        initial_available,
+        initial_backordered,
+        line_item_id
+      FROM order_line_backorders
+      WHERE status = 'open'
+        AND override_flag = FALSE
+        AND initial_available < 0
+      ORDER BY initial_backordered DESC, initial_available ASC
+      LIMIT $1 OFFSET $2
+    `, [PAGE_SIZE, offset]);
+    const rows = dataRes.rows;
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+
+    const blocks = [
+      { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})` } },
+      { type: 'divider' }
+    ];
+    for (const row of rows) {
+      blocks.push({
+        type: 'section',
+        fields: [
+          { type: 'mrkdwn', text: `*Order*  \n${row.order_id}` },
+          { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
+          { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
+          { type: 'mrkdwn', text: `*Backordered*  \n${row.initial_backordered}` }
+        ],
+        accessory: {
+          type: 'button',
+          text: { type: 'plain_text', text: 'Mark Fulfilled' },
+          style: 'primary',
+          value: `${row.order_id}|${row.line_item_id}`,
+          action_id: 'mark_fulfilled'
+        }
+      });
+    }
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: '◀ Previous' },
+          action_id: 'backorders_prev',
+          value: String(page),
+          style: 'primary',
+          disabled: page <= 1
+        },
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: 'Next ▶' },
+          action_id: 'backorders_next',
+          value: String(page),
+          style: 'primary',
+          disabled: page >= totalPages
+        }
+      ]
+    });
+    return { blocks, totalPages, total };
+  }
+
+  // Backorders report (paginated)
+  slackApp.command('/sr-backorders', async ({ ack, respond, body }) => {
+    await ack();
+    const page = Math.max(1, parseInt(body.text.trim(), 10) || 1);
+    try {
+      const { blocks, total } = await buildBackordersBlocks(page);
+      if (!blocks) {
         return respond('✅ No open backorders at the moment!');
-      }
-      const blocks = [
-        { type: 'section', text: { type: 'mrkdwn', text: '*Current Backorders*' } },
-        { type: 'divider' }
-      ];
-      for (const row of displayRows) {
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*Order:* ${row.order_id} • *Title:* ${row.product_title} • *Author:* ${row.product_sku}\n• *ISBN:* ${row.product_barcode} • Ordered: ${row.ordered_qty}\n• Available: ${row.initial_available}\n• Backordered: ${row.initial_backordered}`
-          }
-        });
-      }
-      if (rows.length > MAX_DISPLAY) {
-        blocks.push({
-          type: 'context',
-          elements: [
-            { type: 'mrkdwn', text: `Showing ${MAX_DISPLAY} of ${rows.length} backorders. Narrow your query or use pagination.` }
-          ]
-        });
       }
       await respond({ blocks });
     } catch (error) {
       console.error('Error fetching backorders:', error);
       await respond('❌ Sorry, I was unable to load backorders.');
+    }
+  });
+
+  // Navigate to previous page
+  slackApp.action('backorders_prev', async ({ ack, body, client }) => {
+    await ack();
+    const currentPage = parseInt(body.actions[0].value, 10);
+    const prevPage = currentPage - 1;
+    const page = prevPage >= 1 ? prevPage : 1;
+    try {
+      const { blocks } = await buildBackordersBlocks(page);
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: '', // required fallback
+        blocks
+      });
+    } catch (error) {
+      console.error('Error paginating backorders (prev):', error);
+    }
+  });
+
+  // Navigate to next page
+  slackApp.action('backorders_next', async ({ ack, body, client }) => {
+    await ack();
+    const currentPage = parseInt(body.actions[0].value, 10);
+    const nextPage = currentPage + 1;
+    try {
+      const { blocks, totalPages } = await buildBackordersBlocks(nextPage);
+      // If user tried to go past last page, just stay at last
+      const page = nextPage > totalPages ? totalPages : nextPage;
+      const { blocks: blocksFinal } = await buildBackordersBlocks(page);
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: '',
+        blocks: blocksFinal
+      });
+    } catch (error) {
+      console.error('Error paginating backorders (next):', error);
     }
   });
 
