@@ -126,7 +126,11 @@ module.exports = function registerSlackCommands(slackApp) {
             { type: 'mrkdwn', text: `*Status*  \`${statusText}\`` },
             { type: 'mrkdwn', text: `*Title*  \`${row.product_title}\`` },
             { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
-            { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` }
+            { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` },
+            // Conditionally include ETA field
+            ...(row.eta_date
+              ? [{ type: 'mrkdwn', text: `*ETA:*  \`${new Date(row.eta_date).toLocaleDateString()}\`` }]
+              : [])
           ]
         },
         {
@@ -144,7 +148,15 @@ module.exports = function registerSlackCommands(slackApp) {
               text: { type: 'plain_text', text: 'Update ETA' },
               action_id: 'update_eta',
               value: `${row.order_id}|${row.line_item_id}`
-            }
+            },
+            // Conditionally include Clear ETA button when an ETA is set
+            ...(row.eta_date ? [{
+              type: 'button',
+              text: { type: 'plain_text', text: 'Clear ETA' },
+              style: 'danger',
+              action_id: 'clear_eta',
+              value: `${row.order_id}|${row.line_item_id}`
+            }] : [])
           ]
         },
         { type: 'divider' }
@@ -474,6 +486,26 @@ module.exports = function registerSlackCommands(slackApp) {
         ]
       }
     });
+  });
+
+  // Handle "Clear ETA" button clicks
+  slackApp.action('clear_eta', async ({ ack, body, client }) => {
+    await ack();
+    const [orderId, lineItemId] = body.actions[0].value.split('|');
+    try {
+      // Clear the eta_date for this row
+      await db.query(
+        `UPDATE order_line_backorders
+           SET eta_date = NULL
+         WHERE order_id = $1
+           AND line_item_id = $2`,
+        [orderId, lineItemId]
+      );
+      // Refresh Home view for user
+      await publishBackordersHomeView(body.user.id, client);
+    } catch (err) {
+      console.error('Error clearing ETA date:', err);
+    }
   });
 
   // Handle ETA modal submission
