@@ -56,6 +56,10 @@ module.exports = function registerSlackCommands(slackApp) {
       case 'vendor':
         orderClause = 'product_vendor ASC';
         break;
+      case 'title':
+        // Sort alphabetically by product title
+        orderClause = 'product_title ASC';
+        break;
       case 'qty':
         orderClause = 'initial_backordered DESC';
         break;
