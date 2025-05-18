@@ -92,16 +92,21 @@ router.post(
         // Upsert into order_line_backorders
         await db.query(
           `INSERT INTO order_line_backorders
-            (order_id, line_item_id, order_date, variant_id, ordered_qty, initial_available,
+            (order_id,
+             shopify_order_id,
+             line_item_id, order_date, variant_id, ordered_qty, initial_available,
              initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode,
              product_pub_date, product_vendor)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13)
+           VALUES ($1,
+                   $2,
+                   $3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13,$14)
            ON CONFLICT (order_id, line_item_id) DO UPDATE SET
              initial_available   = EXCLUDED.initial_available,
              initial_backordered = EXCLUDED.initial_backordered,
              snapshot_ts         = EXCLUDED.snapshot_ts,
              status              = 'open',
              order_date          = EXCLUDED.order_date,
+             shopify_order_id    = EXCLUDED.shopify_order_id,
              product_title       = EXCLUDED.product_title,
              product_sku         = EXCLUDED.product_sku,
              product_barcode     = EXCLUDED.product_barcode,
@@ -109,6 +114,7 @@ router.post(
              product_vendor      = EXCLUDED.product_vendor;`,
           [
             order.name,
+            order.id,
             line_item_id,
             orderDate,
             variant_id,
