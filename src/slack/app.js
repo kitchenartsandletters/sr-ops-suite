@@ -110,10 +110,10 @@ module.exports = function registerSlackCommands(slackApp) {
         type: 'section',
         fields: [
           { type: 'mrkdwn', text: `*Order:* \`${row.order_id}\`` },
-          { type: 'mrkdwn', text: `*Date*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
+          { type: 'mrkdwn', text: `*Date:*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
           { type: 'mrkdwn', text: `*Status*  \n${statusText}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
-          { type: 'mrkdwn', text: `*Vendor*  \n${row.product_vendor || 'Unknown'}` },
+          { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
           { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
           { type: 'mrkdwn', text: `*Backordered*  \n${row.initial_backordered}` }
         ],
