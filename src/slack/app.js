@@ -203,6 +203,12 @@ module.exports = function registerSlackCommands(slackApp) {
     const prevPage = currentPage - 1;
     const page = prevPage >= 1 ? prevPage : 1;
     try {
+      // Home Tab pagination?
+      if (body.container?.type === 'view') {
+        // user opening Home
+        await publishBackordersHomeView(body.user.id, client, page, sortKey);
+        return;
+      }
       const { blocks } = await buildBackordersBlocks(page, sortKey);
       // Safely get channel and message timestamp
       const channel = body.channel?.id || body.channel_id;
@@ -226,6 +232,11 @@ module.exports = function registerSlackCommands(slackApp) {
     const sortKey = metadata.sortKey || null;
     const nextPage = currentPage + 1;
     try {
+      // Home Tab pagination?
+      if (body.container?.type === 'view') {
+        await publishBackordersHomeView(body.user.id, client, nextPage, sortKey);
+        return;
+      }
       const { blocks, totalPages } = await buildBackordersBlocks(nextPage, sortKey);
       const page = nextPage > totalPages ? totalPages : nextPage;
       const { blocks: blocksFinal } = await buildBackordersBlocks(page, sortKey);
@@ -408,11 +419,11 @@ module.exports = function registerSlackCommands(slackApp) {
   // Other commands can be added here...
 
   /**
-   * Fetches page 1 of backorders (sorted by age) and publishes to the user's App Home.
+   * Fetches paginated backorders (by page/sort) and publishes to the user's App Home.
    */
-  async function publishBackordersHomeView(userId, client) {
-    // Build blocks for page 1, sorted by age
-    const { blocks } = await buildBackordersBlocks(1, 'age');
+  async function publishBackordersHomeView(userId, client, page = 1, sortKey = 'age') {
+    // Build blocks for the requested page and sortKey
+    const { blocks } = await buildBackordersBlocks(page, sortKey);
     // Prepend a header
     const header = {
       type: 'header',
