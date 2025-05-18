@@ -66,8 +66,10 @@ module.exports = function registerSlackCommands(slackApp) {
           const daysUntil = Math.ceil((pubTs - now) / (1000*60*60*24));
           statusText = `Releases in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`;
         } else {
-          // released; calculate days since order
-          const daysOpen = Math.floor((now - new Date(row.order_date).getTime()) / (1000*60*60*24));
+          // released; calculate days since the later of release date or order date
+          const orderTs = new Date(row.order_date).getTime();
+          const startTs = Math.max(pubTs, orderTs);
+          const daysOpen = Math.floor((now - startTs) / (1000*60*60*24));
           statusText = `${daysOpen} day${daysOpen !== 1 ? 's' : ''} open`;
         }
       } else {
