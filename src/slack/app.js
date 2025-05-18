@@ -116,7 +116,7 @@ module.exports = function registerSlackCommands(slackApp) {
       blocks.push({
         type: 'section',
         fields: [
-          { type: 'mrkdwn', text: `*Order:* \`${row.order_id}\`` },
+          { type: 'mrkdwn', text: `*Order:* <https://${process.env.SR_SHOPIFY_SHOP.replace(/"/g, '')}/admin/orders/${row.shopify_order_id}|${row.order_id}>` },
           { type: 'mrkdwn', text: `*Date:*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
           { type: 'mrkdwn', text: `*Status*  \n${statusText}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
