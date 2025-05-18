@@ -114,8 +114,7 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*Status*  \n${statusText}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
           { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
-          { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
-          { type: 'mrkdwn', text: `*Backordered*  \n${row.initial_backordered}` }
+          { type: 'mrkdwn', text: `*Open Qty*  \`${row.ordered_qty}\`` }
         ],
         accessory: {
           type: 'button',
