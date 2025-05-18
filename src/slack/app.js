@@ -72,7 +72,7 @@ module.exports = function registerSlackCommands(slackApp) {
 
     const dataRes = await db.query(`
       SELECT
-        order_id, order_date, product_title, product_sku,
+        order_id, shopify_order_id, order_date, product_title, product_sku,
         product_barcode, product_vendor, product_pub_date,
         ordered_qty, initial_available, initial_backordered,
         line_item_id
