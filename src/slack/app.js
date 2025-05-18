@@ -114,7 +114,7 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*Status*  \n${statusText}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
           { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
-          { type: 'mrkdwn', text: `*Open Qty*  \`${row.ordered_qty}\`` }
+          { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` }
         ],
         accessory: {
           type: 'button',
@@ -124,8 +124,8 @@ module.exports = function registerSlackCommands(slackApp) {
           action_id: 'mark_fulfilled'
         }
       });
+      blocks.push({ type: 'divider' });
     }
-    blocks.push({ type: 'divider' });
     blocks.push({
       type: 'actions',
       elements: [
