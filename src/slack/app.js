@@ -169,16 +169,14 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     }
     console.log('Using paginated /sr-backorders, page:', page, 'sortKey:', sortKey);
-    // If invoked with a sortKey, push directly to App Home
-    if (sortKey) {
-      await client.chat.postEphemeral({
-        channel: body.channel_id,
-        user: body.user_id,
-        text: `Publishing backorders (sorted by ${sortKey}) to your App Home…`
-      });
-      await publishBackordersHomeView(body.user_id, client, page, sortKey);
-      return;
-    }
+    // Always publish backorders to the user's App Home
+    await client.chat.postEphemeral({
+      channel: body.channel_id,
+      user: body.user_id,
+      text: `Publishing backorders to your App Home…`
+    });
+    await publishBackordersHomeView(body.user_id, client, page, sortKey);
+    return;
     try {
       const { blocks, total } = await buildBackordersBlocks(page, sortKey);
       if (!blocks) {
