@@ -16,7 +16,10 @@ module.exports = function registerSlackCommands(slackApp) {
   // When a user opens the App Home, publish their dashboard
   slackApp.event('app_home_opened', async ({ event, client }) => {
     try {
-      await publishBackordersHomeView(event.user, client);
+      // Only publish default view if no private_metadata (first open)
+      if (!event.view?.private_metadata) {
+        await publishBackordersHomeView(event.user, client, 1, 'age');
+      }
     } catch (err) {
       console.error('Error publishing App Home view:', err);
     }
@@ -447,6 +450,7 @@ module.exports = function registerSlackCommands(slackApp) {
       user_id: userId,
       view: {
         type: 'home',
+        private_metadata: JSON.stringify({ page, sortKey }),
         blocks: [header, { type: 'divider' }, ...(blocks ?? [])]
       }
     });
