@@ -53,17 +53,32 @@ router.post(
         const variant = await shopify.productVariant.get(variant_id);
         const inventoryItemId = variant.inventory_item_id;
 
-        // Fetch product to get vendor code
+        // Fetch vendor, barcode, and pub_date via GraphQL
         let productVendor = null;
+        let productBarcode = variant.barcode || null;
+        let productPubDate = null;
         try {
-          const product = await shopify.product.get(variant.product_id);
-          productVendor = product.vendor || null;
+          const gqlQuery = `
+            query GetProduct($id: ID!) {
+              product(id: $id) {
+                vendor
+                variants(first: 1) { edges { node { barcode } } }
+                metafields(namespace: "custom", first: 10) {
+                  edges { node { key value } }
+                }
+              }
+            }`;
+          const gid = `gid://shopify/Product/${variant.product_id}`;
+          const resp = await shopify.graphql(gqlQuery, { id: gid });
+          const pr = resp.product;
+          productVendor  = pr.vendor || null;
+          productBarcode = pr.variants.edges[0]?.node.barcode || productBarcode;
+          const pubEntry = pr.metafields.edges.find(e => e.node.key === 'pub_date');
+          productPubDate = pubEntry ? pubEntry.node.value : null;
+          console.log(`Webhook GraphQL fetched for product ${variant.product_id}: vendor=`, productVendor, ', pub_date=', productPubDate);
         } catch (err) {
-          console.error(`Error fetching product ${variant.product_id} for vendor:`, err);
+          console.error(`GraphQL fetch error for product ${variant.product_id}:`, err);
         }
-
-        // Use the variant’s barcode for productBarcode
-        const productBarcode = variant.barcode || null;
 
         // Fetch current available inventory
         const levels = await shopify.inventoryLevel.list({
@@ -79,8 +94,8 @@ router.post(
           `INSERT INTO order_line_backorders
             (order_id, line_item_id, order_date, variant_id, ordered_qty, initial_available,
              initial_backordered, snapshot_ts, status, product_title, product_sku, product_barcode,
-             product_vendor)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12)
+             product_pub_date, product_vendor)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13)
            ON CONFLICT (order_id, line_item_id) DO UPDATE SET
              initial_available   = EXCLUDED.initial_available,
              initial_backordered = EXCLUDED.initial_backordered,
@@ -90,6 +105,7 @@ router.post(
              product_title       = EXCLUDED.product_title,
              product_sku         = EXCLUDED.product_sku,
              product_barcode     = EXCLUDED.product_barcode,
+             product_pub_date    = EXCLUDED.product_pub_date,
              product_vendor      = EXCLUDED.product_vendor;`,
           [
             order.name,
@@ -103,6 +119,7 @@ router.post(
             productTitle,
             productSku,
             productBarcode,
+            productPubDate,
             productVendor
           ]
         );

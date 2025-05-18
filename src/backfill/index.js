@@ -71,18 +71,37 @@ const db = new Pool({
         console.error(`Error fetching variant ${variantId} for order ${orderId}:`, err);
         continue;
       }
-      // Fetch product to get vendor code
+      // Fetch vendor, barcode, and pub_date via GraphQL
       let productVendor = null;
+      let productBarcode = null;
+      let productPubDate = null;
       try {
-        const product = await retryWithBackoff(() => shopify.product.get(variant.product_id));
-        productVendor = product.vendor || null;
-        console.log(`Fetched vendor for product ${variant.product_id} in order ${orderId}:`, productVendor);
+        const gqlQuery = `
+          query GetProduct($id: ID!) {
+            product(id: $id) {
+              vendor
+              variants(first: 1) { edges { node { barcode } } }
+              metafields(first: 10, namespace: "custom") {
+                edges { node { key value } }
+              }
+            }
+          }`;
+        const gid = `gid://shopify/Product/${variant.product_id}`;
+        const resp = await retryWithBackoff(() => shopify.graphql(gqlQuery, { id: gid }));
+        const pr = resp.product;
+        productVendor  = pr.vendor || null;
+        productBarcode = pr.variants.edges[0]?.node.barcode || null;
+        // Extract pub_date from returned metafields
+        const mfEdges = pr.metafields.edges || [];
+        const pubEntry = mfEdges.find(e => e.node.key === 'pub_date');
+        productPubDate = pubEntry ? pubEntry.node.value : null;
+        console.log(`Fetched via GraphQL for product ${variant.product_id} in order ${orderId}: vendor=`, productVendor, ', pub_date=', productPubDate);
       } catch (err) {
-        console.error(`Error fetching product ${variant.product_id} for vendor on order ${orderId}:`, err);
+        console.error(`GraphQL fetch error for product ${variant.product_id} in order ${orderId}:`, err);
       }
       const inventoryItemId = variant.inventory_item_id;
       // Use the variant’s barcode for the product barcode
-      const productBarcode = variant.barcode || null;
+      // const productBarcode = variant.barcode || null;
 
       // Fetch current available inventory
       let levels;
@@ -116,11 +135,13 @@ const db = new Pool({
           status,
           product_title,
           product_sku,
-          product_barcode
-          ,product_vendor
+          product_barcode,
+          product_pub_date,
+          product_vendor
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, $11
-          ,$12
+          $1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, $11,
+          $12,
+          $13
         )
         ON CONFLICT (order_id, line_item_id) DO UPDATE SET
           initial_available   = EXCLUDED.initial_available,
@@ -130,8 +151,9 @@ const db = new Pool({
           order_date          = EXCLUDED.order_date,
           product_title       = EXCLUDED.product_title,
           product_sku         = EXCLUDED.product_sku,
-          product_barcode     = EXCLUDED.product_barcode
-          ,product_vendor      = EXCLUDED.product_vendor;
+          product_barcode     = EXCLUDED.product_barcode,
+          product_pub_date    = EXCLUDED.product_pub_date,
+          product_vendor      = EXCLUDED.product_vendor;
         `,
         [
           orderId,
@@ -144,8 +166,9 @@ const db = new Pool({
           snapshotTs,
           productTitle,
           productSku,
-          productBarcode
-          ,productVendor
+          productBarcode,
+          productPubDate,
+          productVendor
         ]
       );
       console.log(`Backfilled snapshot for Order ${orderId}, Item ${lineItemId}: backordered=${initialBackordered}, available=${initialAvailable}`);
