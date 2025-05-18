@@ -87,7 +87,11 @@ module.exports = function registerSlackCommands(slackApp) {
     const totalPages = Math.ceil(total / PAGE_SIZE);
 
     const sortLabel = sortKey ? ` • sorted by ${sortKey}` : '';
+    const lastRefreshed = new Date().toLocaleString();
     const blocks = [
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Dashboard' } },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: `*Last refreshed:* ${lastRefreshed}` }] },
+      { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})${sortLabel}` } },
       { type: 'divider' }
     ];
@@ -113,25 +117,38 @@ module.exports = function registerSlackCommands(slackApp) {
         const daysOpen = Math.floor((now - new Date(row.order_date).getTime()) / (1000*60*60*24));
         statusText = `${daysOpen} day${daysOpen !== 1 ? 's' : ''} open`;
       }
-      blocks.push({
-        type: 'section',
-        fields: [
-          { type: 'mrkdwn', text: `*Order:* <https://${process.env.SR_SHOPIFY_SHOP.replace(/"/g, '')}/admin/orders/${row.shopify_order_id}|${row.order_id}>` },
-          { type: 'mrkdwn', text: `*Date:*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
-          { type: 'mrkdwn', text: `*Status*  \`*${statusText}*\`` },
-          { type: 'mrkdwn', text: `*Title*  \`${row.product_title}\`` },
-          { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
-          { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` }
-        ],
-        accessory: {
-          type: 'button',
-          text: { type: 'plain_text', text: 'Mark Fulfilled' },
-          style: 'primary',
-          value: `${row.order_id}|${row.line_item_id}`,
-          action_id: 'mark_fulfilled'
-        }
-      });
-      blocks.push({ type: 'divider' });
+      blocks.push(
+        {
+          type: 'section',
+          fields: [
+            { type: 'mrkdwn', text: `*Order:* <https://${process.env.SR_SHOPIFY_SHOP.replace(/"/g, '')}/admin/orders/${row.shopify_order_id}|${row.order_id}>` },
+            { type: 'mrkdwn', text: `*Date:*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
+            { type: 'mrkdwn', text: `*Status*  \`${statusText}\`` },
+            { type: 'mrkdwn', text: `*Title*  \`${row.product_title}\`` },
+            { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
+            { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` }
+          ]
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Mark Fulfilled' },
+              style: 'primary',
+              action_id: 'mark_fulfilled',
+              value: `${row.order_id}|${row.line_item_id}`
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Update ETA' },
+              action_id: 'update_eta',
+              value: `${row.order_id}|${row.line_item_id}`
+            }
+          ]
+        },
+        { type: 'divider' }
+      );
     }
     blocks.push({
       type: 'actions',
@@ -430,6 +447,53 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
+  // Handle "Update ETA" button clicks (open modal)
+  slackApp.action('update_eta', async ({ ack, body, client }) => {
+    await ack();
+    const triggerId = body.trigger_id;
+    const [orderId, lineItemId] = body.actions[0].value.split('|');
+    await client.views.open({
+      trigger_id: triggerId,
+      view: {
+        type: 'modal',
+        callback_id: 'update_eta_submit',
+        private_metadata: `${orderId}|${lineItemId}`,
+        title: { type: 'plain_text', text: 'Set ETA' },
+        submit: { type: 'plain_text', text: 'Save' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'eta_input',
+            label: { type: 'plain_text', text: 'ETA date' },
+            element: {
+              type: 'datepicker',
+              action_id: 'eta_action'
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  // Handle ETA modal submission
+  slackApp.view('update_eta_submit', async ({ ack, body, client }) => {
+    await ack();
+    const metadata = body.view.private_metadata;
+    const [orderId, lineItemId] = metadata.split('|');
+    const etaDate = body.view.state.values.eta_input.eta_action.selected_date;
+    try {
+      await db.query(
+        `UPDATE order_line_backorders SET eta_date = $1 WHERE order_id = $2 AND line_item_id = $3`,
+        [etaDate, orderId, lineItemId]
+      );
+      // Refresh Home view for user
+      await publishBackordersHomeView(body.user.id, client);
+    } catch (err) {
+      console.error('Error saving ETA date:', err);
+    }
+  });
+
   // Other commands can be added here...
 
   /**
@@ -438,18 +502,13 @@ module.exports = function registerSlackCommands(slackApp) {
   async function publishBackordersHomeView(userId, client, page = 1, sortKey = 'age') {
     // Build blocks for the requested page and sortKey
     const { blocks } = await buildBackordersBlocks(page, sortKey);
-    // Prepend a header
-    const header = {
-      type: 'header',
-      text: { type: 'plain_text', text: '📦 Backorders Dashboard' }
-    };
-    // Publish the view
+    // Publish the view (blocks already have header/context/divider)
     await client.views.publish({
       user_id: userId,
       view: {
         type: 'home',
         private_metadata: JSON.stringify({ page, sortKey }),
-        blocks: [header, { type: 'divider' }, ...(blocks ?? [])]
+        blocks: blocks ?? []
       }
     });
   }
