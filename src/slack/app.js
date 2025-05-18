@@ -137,14 +137,14 @@ module.exports = function registerSlackCommands(slackApp) {
           type: 'button',
           text: { type: 'plain_text', text: '◀ Previous' },
           action_id: 'backorders_prev',
-          value: String(page),
+          value: `${page}|${sortKey || ''}`,
           style: 'primary'
         },
         {
           type: 'button',
           text: { type: 'plain_text', text: 'Next ▶' },
           action_id: 'backorders_next',
-          value: String(page),
+          value: `${page}|${sortKey || ''}`,
           style: 'primary'
         }
       ]
@@ -210,9 +210,9 @@ module.exports = function registerSlackCommands(slackApp) {
   // Navigate to previous page
   slackApp.action('backorders_prev', async ({ ack, body, client }) => {
     await ack();
-    const currentPage = parseInt(body.actions[0].value, 10);
-    const metadata = body.message?.metadata?.event_payload || {};
-    const sortKey = metadata.sortKey || null;
+    const [rawPage, rawSort] = body.actions[0].value.split('|');
+    const currentPage = parseInt(rawPage, 10);
+    const sortKey = rawSort || null;
     const prevPage = currentPage - 1;
     const page = prevPage >= 1 ? prevPage : 1;
     try {
@@ -240,9 +240,9 @@ module.exports = function registerSlackCommands(slackApp) {
   // Navigate to next page
   slackApp.action('backorders_next', async ({ ack, body, client }) => {
     await ack();
-    const currentPage = parseInt(body.actions[0].value, 10);
-    const metadata = body.message?.metadata?.event_payload || {};
-    const sortKey = metadata.sortKey || null;
+    const [rawPage, rawSort] = body.actions[0].value.split('|');
+    const currentPage = parseInt(rawPage, 10);
+    const sortKey = rawSort || null;
     const nextPage = currentPage + 1;
     try {
       // Home Tab pagination?
