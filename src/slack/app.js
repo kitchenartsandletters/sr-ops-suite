@@ -13,6 +13,15 @@ const PAGE_SIZE = 10;
 module.exports = function registerSlackCommands(slackApp) {
   const client = slackApp.client;
 
+  // When a user opens the App Home, publish their dashboard
+  slackApp.event('app_home_opened', async ({ event, client }) => {
+    try {
+      await publishBackordersHomeView(event.user, client);
+    } catch (err) {
+      console.error('Error publishing App Home view:', err);
+    }
+  });
+
   // Helper to build paginated backorders blocks
   async function buildBackordersBlocks(page, sortKey = null) {
     // Get total count
@@ -397,4 +406,25 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // Other commands can be added here...
+
+  /**
+   * Fetches page 1 of backorders (sorted by age) and publishes to the user's App Home.
+   */
+  async function publishBackordersHomeView(userId, client) {
+    // Build blocks for page 1, sorted by age
+    const { blocks } = await buildBackordersBlocks(1, 'age');
+    // Prepend a header
+    const header = {
+      type: 'header',
+      text: { type: 'plain_text', text: '📦 Backorders Dashboard' }
+    };
+    // Publish the view
+    await client.views.publish({
+      user_id: userId,
+      view: {
+        type: 'home',
+        blocks: [header, { type: 'divider' }, ...(blocks ?? [])]
+      }
+    });
+  }
 };
