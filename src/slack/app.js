@@ -36,6 +36,7 @@ module.exports = function registerSlackCommands(slackApp) {
         product_sku,
         product_barcode,
         product_vendor,
+        product_pub_date,
         ordered_qty,
         initial_available,
         initial_backordered,
@@ -55,14 +56,31 @@ module.exports = function registerSlackCommands(slackApp) {
       { type: 'divider' }
     ];
     for (const row of rows) {
-      // compute days open
-      const daysOpen = Math.floor((Date.now() - new Date(row.order_date).getTime()) / (1000*60*60*24));
+      // determine status: unreleased preorder vs open backorder
+      const now = Date.now();
+      let statusText;
+      if (row.product_pub_date) {
+        const pubTs = new Date(row.product_pub_date).getTime();
+        if (pubTs > now) {
+          // still a preorder not yet released
+          const daysUntil = Math.ceil((pubTs - now) / (1000*60*60*24));
+          statusText = `Releases in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`;
+        } else {
+          // released; calculate days since order
+          const daysOpen = Math.floor((now - new Date(row.order_date).getTime()) / (1000*60*60*24));
+          statusText = `${daysOpen} day${daysOpen !== 1 ? 's' : ''} open`;
+        }
+      } else {
+        // no pub_date (non-preorder), treat as normal backorder
+        const daysOpen = Math.floor((now - new Date(row.order_date).getTime()) / (1000*60*60*24));
+        statusText = `${daysOpen} day${daysOpen !== 1 ? 's' : ''} open`;
+      }
       blocks.push({
         type: 'section',
         fields: [
           { type: 'mrkdwn', text: `*Order*  \n${row.order_id}` },
           { type: 'mrkdwn', text: `*Date*  \n${new Date(row.order_date).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Days Open*  \n${daysOpen}` },
+          { type: 'mrkdwn', text: `*Status*  \n${statusText}` },
           { type: 'mrkdwn', text: `*Title*  \n${row.product_title}` },
           { type: 'mrkdwn', text: `*Vendor*  \n${row.product_vendor || 'Unknown'}` },
           { type: 'mrkdwn', text: `*On Hand*  \n${row.initial_available}` },
