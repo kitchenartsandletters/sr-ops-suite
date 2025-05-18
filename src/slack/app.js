@@ -14,7 +14,7 @@ module.exports = function registerSlackCommands(slackApp) {
   const client = slackApp.client;
 
   // Helper to build paginated backorders blocks
-  async function buildBackordersBlocks(page) {
+  async function buildBackordersBlocks(page, sortKey = null) {
     // Get total count
     const countRes = await db.query(`
       SELECT COUNT(*) AS total
@@ -28,31 +28,51 @@ module.exports = function registerSlackCommands(slackApp) {
       return { blocks: null, totalPages: 1, total };
     }
     const offset = (page - 1) * PAGE_SIZE;
+
+    // Determine ORDER BY clause based on sortKey
+    let orderClause;
+    switch (sortKey) {
+      case 'age':
+        orderClause = `
+          FLOOR(
+            EXTRACT(EPOCH FROM (
+              NOW() - GREATEST(
+                COALESCE(product_pub_date::timestamp, order_date),
+                order_date
+              )
+            )) / 86400
+          ) DESC
+        `;
+        break;
+      case 'vendor':
+        orderClause = 'product_vendor ASC';
+        break;
+      case 'qty':
+        orderClause = 'initial_backordered DESC';
+        break;
+      default:
+        orderClause = 'initial_backordered DESC, initial_available ASC';
+    }
+
     const dataRes = await db.query(`
       SELECT
-        order_id,
-        order_date,
-        product_title,
-        product_sku,
-        product_barcode,
-        product_vendor,
-        product_pub_date,
-        ordered_qty,
-        initial_available,
-        initial_backordered,
+        order_id, order_date, product_title, product_sku,
+        product_barcode, product_vendor, product_pub_date,
+        ordered_qty, initial_available, initial_backordered,
         line_item_id
       FROM order_line_backorders
       WHERE status = 'open'
         AND override_flag = FALSE
         AND initial_available < 0
-      ORDER BY initial_backordered DESC, initial_available ASC
+      ORDER BY ${orderClause}
       LIMIT $1 OFFSET $2
     `, [PAGE_SIZE, offset]);
     const rows = dataRes.rows;
     const totalPages = Math.ceil(total / PAGE_SIZE);
 
+    const sortLabel = sortKey ? ` • sorted by ${sortKey}` : '';
     const blocks = [
-      { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})${sortLabel}` } },
       { type: 'divider' }
     ];
     for (const row of rows) {
@@ -123,10 +143,19 @@ module.exports = function registerSlackCommands(slackApp) {
   // Backorders report (paginated)
   slackApp.command('/sr-backorders', async ({ ack, body }) => {
     await ack();
-    console.log('Using paginated /sr-backorders, page:', Math.max(1, parseInt(body.text.trim(), 10) || 1));
-    const page = Math.max(1, parseInt(body.text.trim(), 10) || 1);
+    // Parse page number and optional sort flag
+    const parts = body.text.trim().split(/\s+/);
+    let page = 1, sortKey = null;
+    for (const p of parts) {
+      if (/^\d+$/.test(p)) {
+        page = Math.max(1, parseInt(p, 10));
+      } else if (p.startsWith('sort:')) {
+        sortKey = p.split(':')[1];
+      }
+    }
+    console.log('Using paginated /sr-backorders, page:', page, 'sortKey:', sortKey);
     try {
-      const { blocks, total } = await buildBackordersBlocks(page);
+      const { blocks, total } = await buildBackordersBlocks(page, sortKey);
       if (!blocks) {
         return await client.chat.postMessage({
           channel: body.channel_id,
@@ -141,6 +170,10 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.postMessage({
         channel: body.channel_id,
         text: `Current Backorders (Page ${page} of ${Math.ceil(total / PAGE_SIZE)})`,
+        metadata: {
+          event_type: 'sr_backorders',
+          event_payload: { sortKey }
+        },
         blocks
       });
     } catch (error) {
@@ -156,10 +189,12 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('backorders_prev', async ({ ack, body, client }) => {
     await ack();
     const currentPage = parseInt(body.actions[0].value, 10);
+    const metadata = body.message?.metadata?.event_payload || {};
+    const sortKey = metadata.sortKey || null;
     const prevPage = currentPage - 1;
     const page = prevPage >= 1 ? prevPage : 1;
     try {
-      const { blocks } = await buildBackordersBlocks(page);
+      const { blocks } = await buildBackordersBlocks(page, sortKey);
       // Safely get channel and message timestamp
       const channel = body.channel?.id || body.channel_id;
       const ts = body.message?.ts || body.container?.message_ts;
@@ -178,11 +213,13 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('backorders_next', async ({ ack, body, client }) => {
     await ack();
     const currentPage = parseInt(body.actions[0].value, 10);
+    const metadata = body.message?.metadata?.event_payload || {};
+    const sortKey = metadata.sortKey || null;
     const nextPage = currentPage + 1;
     try {
-      const { blocks, totalPages } = await buildBackordersBlocks(nextPage);
+      const { blocks, totalPages } = await buildBackordersBlocks(nextPage, sortKey);
       const page = nextPage > totalPages ? totalPages : nextPage;
-      const { blocks: blocksFinal } = await buildBackordersBlocks(page);
+      const { blocks: blocksFinal } = await buildBackordersBlocks(page, sortKey);
       // Safely get channel and message timestamp
       const channel = body.channel?.id || body.channel_id;
       const ts = body.message?.ts || body.container?.message_ts;
