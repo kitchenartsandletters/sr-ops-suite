@@ -618,7 +618,7 @@ module.exports = function registerSlackCommands(slackApp) {
       const blocks = [];
       for (const r of rows) {
         const fields = [
-          { type: 'mrkdwn', text: `*ISBN:* ${r.isbn}` },
+          { type: 'mrkdwn', text: `*ISBN:* ${r.isbn || 'N/A'}` },
           { type: 'mrkdwn', text: `*Title:* ${r.title}` },
           { type: 'mrkdwn', text: `*Oldest:* ${new Date(r.oldest).toLocaleDateString()}` },
           { type: 'mrkdwn', text: `*Newest:* ${new Date(r.newest).toLocaleDateString()}` },
