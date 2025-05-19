@@ -29,6 +29,8 @@ module.exports = function registerSlackCommands(slackApp) {
     return `${filenameDate}_${filenameTime}`;
   }
   const client = slackApp.client;
+  // Debug: log configured export URL base
+  console.log('SR_APP_URL:', process.env.SR_APP_URL);
 
   // CSV export endpoint (handles with or without trailing slash)
   slackApp.receiver.app.get(['/export/backorders-list', '/export/backorders-list/'], async (req, res) => {
@@ -67,6 +69,16 @@ module.exports = function registerSlackCommands(slackApp) {
       console.error('Error generating CSV:', err);
       res.status(500).send('Internal Server Error');
     }
+  });
+  // Debug: dump registered routes
+  const routes = slackApp.receiver.app._router.stack
+    .filter(r => r.route && r.route.path)
+    .map(r => `${Object.keys(r.route.methods).join(',').toUpperCase()} ${r.route.path}`);
+  console.log('Registered routes:', routes);
+  // Debug: log all incoming requests
+  slackApp.receiver.app.use((req, res, next) => {
+    console.log('Incoming request:', req.method, req.originalUrl);
+    next();
   });
 
   // When a user opens the App Home, publish their dashboard
@@ -636,7 +648,6 @@ module.exports = function registerSlackCommands(slackApp) {
       ORDER BY total_open_qty DESC
     `);
     const rows = res.rows;
-    console.log('Aggregated rows:', JSON.stringify(rows, null, 2));
     const count = rows.length;
     const lastRefreshed = new Date().toLocaleString('en-US', {
       timeZone: 'America/New_York',
