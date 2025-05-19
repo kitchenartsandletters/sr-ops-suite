@@ -198,7 +198,7 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // Backorders report (paginated)
-  slackApp.command('/sr-back', async ({ ack, body }) => {
+  slackApp.command('/sr-back', async ({ ack, body, client, context }) => {
     await ack();
     // Parse page number and optional sort flag
     const parts = body.text.trim().split(/\s+/);
@@ -219,6 +219,8 @@ module.exports = function registerSlackCommands(slackApp) {
     });
     await publishBackordersHomeView(body.user_id, client, page, sortKey);
     return;
+    // (old unreachable code below kept for reference)
+    /*
     try {
       const { blocks, total } = await buildBackordersBlocks(page, sortKey);
       if (!blocks) {
@@ -248,6 +250,7 @@ module.exports = function registerSlackCommands(slackApp) {
         text: '❌ Sorry, I was unable to load backorders.'
       });
     }
+    */
   });
 
   // Navigate to previous page
@@ -558,3 +561,47 @@ module.exports = function registerSlackCommands(slackApp) {
     });
   }
 };
+
+  /**
+   * List the last 10 backorders for easy undo.
+   * Usage: /sr-back-list
+   */
+  slackApp.command('/sr-back-list', async ({ ack, body, client, context }) => {
+    await ack();
+    try {
+      const res = await db.query(`
+        SELECT order_id, line_item_id, product_title, product_barcode, order_date
+          FROM order_line_backorders
+         WHERE status = 'open'
+           AND override_flag = FALSE
+         ORDER BY order_date DESC
+         LIMIT 10
+      `);
+      const rows = res.rows;
+      if (rows.length === 0) {
+        await client.chat.postEphemeral({
+          channel: body.channel_id,
+          user: body.user_id,
+          text: 'No open backorders found.'
+        });
+        return;
+      }
+      // Build numbered list
+      const lines = rows.map((r, i) =>
+        `*${i+1}.* Order ${r.order_id} – ${r.product_title} – ISBN ${r.product_barcode}`
+      );
+      lines.unshift('*Current Open Backorders:*');
+      await client.chat.postEphemeral({
+        channel: body.channel_id,
+        user: body.user_id,
+        text: lines.join('\n')
+      });
+    } catch (err) {
+      console.error('Error listing open backorders:', err);
+      await client.chat.postEphemeral({
+        channel: body.channel_id,
+        user: body.user_id,
+        text: '❌ Failed to list open backorders.'
+      });
+    }
+  });
