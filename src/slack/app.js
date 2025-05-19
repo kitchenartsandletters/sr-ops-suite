@@ -578,86 +578,80 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   }
-  // Quick, super-condensed backorders dashboard
+  // Build aggregated blocks: one row per ISBN
+  async function buildAggregatedBlocks() {
+    const res = await db.query(`
+      SELECT
+        product_barcode   AS barcode,
+        product_title     AS title,
+        product_vendor    AS vendor,
+        MIN(order_date)::date AS oldest,
+        MAX(order_date)::date AS newest,
+        SUM(ordered_qty)  AS total_open_qty
+      FROM order_line_backorders
+      WHERE status = 'open'
+        AND override_flag = FALSE
+      GROUP BY product_barcode, product_title, product_vendor
+      ORDER BY total_open_qty DESC
+    `);
+    const rows = res.rows;
+    // Build blocks: header, export button, then one section per barcode
+    const blocks = [
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Summary' } },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Export CSV' },
+            url: `${process.env.SR_APP_URL}/export/backorders-list`,
+            action_id: 'download_csv'
+          }
+        ]
+      }
+    ];
+    for (const r of rows) {
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `${r.barcode || 'N/A'} • ${r.title} • Oldest: ${new Date(r.oldest).toLocaleDateString()} • Newest: ${new Date(r.newest).toLocaleDateString()} • Qty: ${r.total_open_qty} • Vendor: ${r.vendor || 'N/A'}`
+        }
+      });
+    }
+    return blocks;
+  }
+
+  // Publish aggregated blocks to the App Home
+  async function publishAggregatedHomeView(userId, client) {
+    const blocks = await buildAggregatedBlocks();
+    await client.views.publish({
+      user_id: userId,
+      view: {
+        type: 'home',
+        blocks
+      }
+    });
+  }
+
+  // Aggregated backorders summary to App Home
   slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
     await ack();
     try {
-      // Aggregated query: one row per barcode
-      const res = await db.query(`
-        SELECT
-          product_barcode AS barcode,
-          product_title   AS title,
-          product_vendor  AS vendor,
-          MIN(order_date)::date AS oldest,
-          MAX(order_date)::date AS newest,
-          SUM(ordered_qty) AS total_open_qty
-        FROM order_line_backorders
-        WHERE status = 'open'
-          AND override_flag = FALSE
-        GROUP BY product_barcode, product_title, product_vendor
-        ORDER BY total_open_qty DESC
-      `);
-
-      const rows = res.rows;
-      if (rows.length === 0) {
-        return await client.chat.postEphemeral({
-          channel: body.channel_id,
-          user: body.user_id,
-          text: 'No open backorders found.'
-        });
-      }
-
-      // Build blocks: header, one Export CSV button, then one section per barcode
-      const blocks = [
-        {
-          type: 'header',
-          text: { type: 'plain_text', text: '📦 Backorders Dashboard' }
-        },
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              text: { type: 'plain_text', text: 'Export CSV' },
-              url: `${process.env.SR_APP_URL}/export/backorders-list`,
-              action_id: 'download_csv'
-            }
-          ]
-        }
-      ];
-
-      for (const r of rows) {
-        blocks.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `${r.barcode || 'N/A'} • ${r.title} • Oldest: ${new Date(r.oldest).toLocaleDateString()} • Newest: ${new Date(r.newest).toLocaleDateString()} • Qty: ${r.total_open_qty} • Vendor: ${r.vendor || 'N/A'}`
-          }
-        });
-      }
-
-      // Publish dashboard to App Home
-      await client.views.publish({
-        user_id: body.user_id,
-        view: {
-          type: 'home',
-          blocks
-        }
-      });
-      // Optionally inform the user
+      // Notify user
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
-        text: 'Backorders dashboard published to App Home.'
+        text: 'Publishing aggregated backorders summary to your App Home...'
       });
-
+      // Publish summary
+      await publishAggregatedHomeView(body.user_id, client);
     } catch (err) {
-      console.error('Error listing open backorders:', err);
-      if (err.data) console.error('Slack API error details:', err.data);
+      console.error('Error handling /sr-back-list:', err);
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
-        text: '❌ Failed to list open backorders.'
+        text: '❌ Failed to publish aggregated summary to App Home.'
       });
     }
   });
