@@ -577,99 +577,72 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   }
-  /**
-   * Quick list of open backorders, aggregated by ISBN/title.
-   * Usage: /sr-back-list
-   */
+  // Quick, super-condensed backorders dashboard
   slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
-    console.log('Invoked /sr-back-list command', {
-      text: body.text,
-      channel: body.channel_id,
-      user: body.user_id
-    });
     await ack();
     try {
-      // Aggregate by ISBN and title
+      // Query aggregated open backorders
       const res = await db.query(`
         SELECT
-          product_barcode AS isbn,
+          product_barcode AS barcode,
           product_title   AS title,
-          MIN(order_date)::date   AS oldest,
-          MAX(order_date)::date   AS newest,
-          SUM(ordered_qty)       AS total_open_qty
+          product_vendor  AS vendor,
+          MIN(order_date)::date AS oldest,
+          MAX(order_date)::date AS newest,
+          SUM(ordered_qty) AS total_open_qty
         FROM order_line_backorders
         WHERE status = 'open'
           AND override_flag = FALSE
-        GROUP BY product_barcode, product_title
+        GROUP BY product_barcode, product_title, product_vendor
         ORDER BY total_open_qty DESC
       `);
 
       const rows = res.rows;
       if (rows.length === 0) {
-        await client.chat.postEphemeral({
+        return await client.chat.postEphemeral({
           channel: body.channel_id,
-          user:    body.user_id,
-          text:    'No open backorders found.'
+          user: body.user_id,
+          text: 'No open backorders found.'
         });
-        return;
       }
 
-      // Build the blocks for each ISBN (explicit loop, fields always array of objects)
+      // Build blocks: one Export CSV button + one line per SKU
       const blocks = [];
-      for (const r of rows) {
-        const fields = [
-          { type: 'mrkdwn', text: `*ISBN:* ${r.isbn || 'N/A'}` },
-          { type: 'mrkdwn', text: `*Title:* ${r.title}` },
-          { type: 'mrkdwn', text: `*Oldest:* ${new Date(r.oldest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Newest:* ${new Date(r.newest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Open Qty:* ${r.total_open_qty}` }
-        ];
-        // Add ETA if present (not in current query, but for extensibility)
-        if (r.eta_date) {
-          fields.push({ type: 'mrkdwn', text: `*ETA:* ${new Date(r.eta_date).toLocaleDateString()}` });
-        }
-        blocks.push(
-          { type: 'section', fields }
-        );
-      }
-      // Add the CSV download button
       blocks.push({
-        type:     'actions',
+        type: 'actions',
         elements: [
           {
             type: 'button',
-            text: { type: 'plain_text', text: 'Download CSV' },
-            url:  `${process.env.SR_APP_URL}/export/backorders-list_${formatEDT()}.csv`,
+            text: { type: 'plain_text', text: 'Export CSV' },
+            url: `${process.env.SR_APP_URL}/export/backorders-list`,
             action_id: 'download_csv'
           }
         ]
       });
+      for (const r of rows) {
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `${r.barcode || 'N/A'} • ${r.title} • Oldest: ${new Date(r.oldest).toLocaleDateString()} • Newest: ${new Date(r.newest).toLocaleDateString()} • Qty: ${r.total_open_qty} • Vendor: ${r.vendor || 'N/A'}`
+          }
+        });
+      }
 
-      // DEBUG: Log blocks payload to identify invalid block structure
-//      console.log('🔍 /sr-back-list blocks payload:', JSON.stringify(blocks, null, 2));
-//      console.log('🧩 blocks count:', blocks.length);
-/*      if (blocks.length > 0) {
-        console.log('🧩 first block:', JSON.stringify(blocks[0], null, 2));
-      }*/
-
-      // Send ephemeral message with fallback text
+      // Send ephemeral dashboard
       await client.chat.postEphemeral({
         channel: body.channel_id,
-        user:    body.user_id,
-        text:    'Open backorders summary',
+        user: body.user_id,
         blocks
       });
 
     } catch (err) {
       console.error('Error listing open backorders:', err);
-      if (err.data) {
-        console.error('Slack API error details:', err.data);
-      }
+      if (err.data) console.error('Slack API error details:', err.data);
       await client.chat.postEphemeral({
         channel: body.channel_id,
-        user:    body.user_id,
-        text:    '❌ Failed to list open backorders.',
-        blocks:  []
+        user: body.user_id,
+        text: '❌ Failed to list open backorders.'
       });
     }
   });
