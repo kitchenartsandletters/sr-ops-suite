@@ -30,8 +30,9 @@ module.exports = function registerSlackCommands(slackApp) {
   }
   const client = slackApp.client;
 
-  // CSV export endpoint
-  slackApp.receiver.app.get('/export/backorders-list', async (req, res) => {
+  // CSV export endpoint (handles with or without trailing slash)
+  slackApp.receiver.app.get(['/export/backorders-list', '/export/backorders-list/'], async (req, res) => {
+    console.log('CSV export endpoint hit:', req.method, req.path);
     try {
       const result = await db.query(`
         SELECT
@@ -193,6 +194,7 @@ module.exports = function registerSlackCommands(slackApp) {
             { type: 'mrkdwn', text: `*Date:*  \`${new Date(row.order_date).toLocaleDateString()}\`` },
             { type: 'mrkdwn', text: `*Status*  \`${statusText}\`` },
             { type: 'mrkdwn', text: `*Title*  \`${row.product_title}\`` },
+            { type: 'mrkdwn', text: `*ISBN:*  \`${row.product_barcode || 'Unknown'}\`` },
             { type: 'mrkdwn', text: `*Vendor:*  \`${row.product_vendor || 'Unknown'}\`` },
             { type: 'mrkdwn', text: `*Open Qty:*  \`${row.ordered_qty}\`` },
             // Conditionally include ETA field
@@ -667,12 +669,12 @@ module.exports = function registerSlackCommands(slackApp) {
       blocks.push({
         type: 'section',
         fields: [
-          { type: 'mrkdwn', text: `*ISBN:*\n${r.barcode || 'N/A'}` },
-          { type: 'mrkdwn', text: `*Title:*\n${r.title}` },
-          { type: 'mrkdwn', text: `*Oldest:*\n${new Date(r.oldest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Newest:*\n${new Date(r.newest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Qty:*\n${r.total_open_qty}` },
-          { type: 'mrkdwn', text: `*Vendor:*\n${r.vendor || 'N/A'}` }
+          { type: 'mrkdwn', text: `*ISBN:*\n\`${r.barcode || 'N/A'}\`` },
+          { type: 'mrkdwn', text: `*Title:*\n\`${r.title}\`` },
+          { type: 'mrkdwn', text: `*Oldest:*\n\`${new Date(r.oldest).toLocaleDateString()}\`` },
+          { type: 'mrkdwn', text: `*Newest:*\n\`${new Date(r.newest).toLocaleDateString()}\`` },
+          { type: 'mrkdwn', text: `*Qty:*\n\`${r.total_open_qty}\`` },
+          { type: 'mrkdwn', text: `*Vendor:*\n\`${r.vendor || 'N/A'}\`` }
         ]
       });
       blocks.push({ type: 'divider' });
