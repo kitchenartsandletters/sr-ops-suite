@@ -688,6 +688,7 @@ module.exports = function registerSlackCommands(slackApp) {
       user_id: userId,
       view: {
         type: 'home',
+        private_metadata: 'aggregated',
         blocks
       }
     });
