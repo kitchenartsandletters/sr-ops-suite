@@ -635,6 +635,7 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
+        text: 'Open backorders dashboard',
         blocks
       });
 
