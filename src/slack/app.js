@@ -91,15 +91,19 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // When a user opens the App Home, publish their dashboard
-  slackApp.event('app_home_opened', async ({ event, client }) => {
-    try {
-      // Only publish default view if no private_metadata (first open)
-      if (!event.view?.private_metadata) {
-        await publishBackordersHomeView(event.user, client, 1, 'age');
+  slackApp.event('app_home_opened', async ({ event, ack, client }) => {
+    await ack();
+    // background view publish
+    (async () => {
+      try {
+        // Only publish default view if no private_metadata (first open)
+        if (!event.view?.private_metadata) {
+          await publishBackordersHomeView(event.user, client, 1, 'age');
+        }
+      } catch (err) {
+        console.error('Error publishing App Home view:', err);
       }
-    } catch (err) {
-      console.error('Error publishing App Home view:', err);
-    }
+    })();
   });
 
   // Helper to build paginated backorders blocks
@@ -718,22 +722,20 @@ module.exports = function registerSlackCommands(slackApp) {
   // Aggregated backorders summary to App Home
   slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
     await ack();
-    try {
-      // Notify user
-      await client.chat.postEphemeral({
-        channel: body.channel_id,
-        user: body.user_id,
-        text: 'Publishing aggregated backorders summary to your App Home...'
-      });
-      // Publish summary
-      await publishAggregatedHomeView(body.user_id, client);
-    } catch (err) {
-      console.error('Error handling /sr-back-list:', err);
-      await client.chat.postEphemeral({
-        channel: body.channel_id,
-        user: body.user_id,
-        text: '❌ Failed to publish aggregated summary to App Home.'
-      });
-    }
+    // Fire-and-forget background processing
+    (async () => {
+      try {
+        // Notify user
+        await client.chat.postEphemeral({
+          channel: body.channel_id,
+          user: body.user_id,
+          text: 'Publishing aggregated backorders summary to your App Home...',
+        });
+        // Publish summary
+        await publishAggregatedHomeView(body.user_id, client);
+      } catch (err) {
+        console.error('Error handling /sr-back-list in background:', err);
+      }
+    })();
   });
 };
