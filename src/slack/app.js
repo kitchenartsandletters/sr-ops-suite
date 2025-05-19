@@ -185,6 +185,23 @@ module.exports = function registerSlackCommands(slackApp) {
       { type: 'context', elements: [{ type: 'mrkdwn', text: `*Last refreshed:* ${lastRefreshed}` }] },
       { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})${sortLabel}` } },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Sort by Title' },
+            action_id: 'backorders_sort_title',
+            value: `${page}|title`
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Sort by Qty' },
+            action_id: 'backorders_sort_qty',
+            value: `${page}|qty`
+          }
+        ]
+      },
       { type: 'divider' }
     ];
     for (const row of rows) {
@@ -391,6 +408,20 @@ module.exports = function registerSlackCommands(slackApp) {
     } catch (error) {
       console.error('Error paginating backorders (next):', error);
     }
+  });
+
+  // Sort by Title
+  slackApp.action('backorders_sort_title', async ({ ack, body, client }) => {
+    await ack();
+    const [page] = body.actions[0].value.split('|');
+    await publishBackordersHomeView(body.user.id, client, parseInt(page, 10), 'title');
+  });
+
+  // Sort by Qty
+  slackApp.action('backorders_sort_qty', async ({ ack, body, client }) => {
+    await ack();
+    const [page] = body.actions[0].value.split('|');
+    await publishBackordersHomeView(body.user.id, client, parseInt(page, 10), 'qty');
   });
 
   // Override backorder status
