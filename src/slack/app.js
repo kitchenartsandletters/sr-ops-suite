@@ -857,6 +857,13 @@ module.exports = function registerSlackCommands(slackApp) {
             value: r.barcode
           });
         }
+        actions.push({
+          type: 'button',
+          text: { type: 'plain_text', text: 'Mark Fulfilled' },
+          style: 'primary',
+          action_id: 'agg_mark_fulfilled',
+          value: r.barcode
+        });
         blocks.splice(blocks.length, 0, { type: 'actions', elements: actions });
       }
       blocks.push({ type: 'divider' });
@@ -1091,6 +1098,34 @@ module.exports = function registerSlackCommands(slackApp) {
       await publishAggregatedHomeView(body.user.id, client);
     } catch (err) {
       console.error('Error clearing aggregated ETA:', err);
+    }
+  });
+
+  // Aggregated Mark Fulfilled
+  slackApp.action('agg_mark_fulfilled', async ({ ack, body, client }) => {
+    await ack();
+    const isbn = body.actions[0].value;
+    try {
+      const result = await db.query(
+        `UPDATE order_line_backorders
+           SET status = 'closed',
+               override_flag = TRUE,
+               override_reason = 'Manually marked fulfilled',
+               override_ts = NOW()
+         WHERE product_barcode = $1
+           AND status = 'open'`,
+        [isbn]
+      );
+      // Notify user of row count
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: `✅ Marked all backorders for ISBN ${isbn} fulfilled (${result.rowCount} row(s)).`
+      });
+      // Refresh aggregated summary
+      await publishAggregatedHomeView(body.user.id, client);
+    } catch (err) {
+      console.error('Error in agg_mark_fulfilled:', err);
     }
   });
 };
