@@ -653,6 +653,9 @@ module.exports = function registerSlackCommands(slackApp) {
 
     } catch (err) {
       console.error('Error listing open backorders:', err);
+      if (err.data) {
+        console.error('Slack API error details:', err.data);
+      }
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user:    body.user_id,
