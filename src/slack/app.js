@@ -743,7 +743,7 @@ module.exports = function registerSlackCommands(slackApp) {
         '• `/sr-override 57294 13059031040133 hold backorder` — Set override with reason\n' +
         '_Example:_ `/sr-override 57294 13059031040133 hold backorder`\n\n' +
         '• `/sr-undo 3` — Undo a specific manual fulfillment (use after `/sr-fulfilled-list` to get its number)\n' +
-        '_Example:_ `/sr-undo 3`' + '\n' +
+        '_Example:_ `/sr-undo 3`'
       } },
       { type: 'divider' }
     ];
