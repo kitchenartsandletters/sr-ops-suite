@@ -30,6 +30,44 @@ module.exports = function registerSlackCommands(slackApp) {
   }
   const client = slackApp.client;
 
+  // CSV export endpoint
+  slackApp.receiver.app.get('/export/backorders-list', async (req, res) => {
+    try {
+      const result = await db.query(`
+        SELECT
+          product_barcode   AS isbn,
+          product_title     AS title,
+          MIN(order_date)::date AS oldest,
+          MAX(order_date)::date AS newest,
+          SUM(ordered_qty)  AS total_open_qty,
+          product_vendor    AS vendor
+        FROM order_line_backorders
+        WHERE status = 'open'
+          AND override_flag = FALSE
+          AND initial_available < 0
+        GROUP BY product_barcode, product_title, product_vendor
+        ORDER BY total_open_qty DESC
+      `);
+      const rows = result.rows;
+      const header = 'ISBN,Title,Oldest,Newest,Total Open Qty,Vendor';
+      const lines = rows.map(r => [
+        r.isbn,
+        `"${r.title.replace(/"/g, '""')}"`,
+        r.oldest,
+        r.newest,
+        r.total_open_qty,
+        r.vendor || ''
+      ].join(','));
+      const csv = [header, ...lines].join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="backorders.csv"');
+      res.send(csv);
+    } catch (err) {
+      console.error('Error generating CSV:', err);
+      res.status(500).send('Internal Server Error');
+    }
+  });
+
   // When a user opens the App Home, publish their dashboard
   slackApp.event('app_home_opened', async ({ event, client }) => {
     try {
@@ -52,7 +90,7 @@ module.exports = function registerSlackCommands(slackApp) {
          AND override_flag = FALSE
          AND initial_available < 0
     `);
-    const total = parseInt(countRes``.rows[0].total, 10);
+    const total = parseInt(countRes.rows[0].total, 10);
     if (total === 0) {
       return { blocks: null, totalPages: 1, total, rows: [] };
     }
@@ -597,9 +635,21 @@ module.exports = function registerSlackCommands(slackApp) {
     `);
     const rows = res.rows;
     console.log('Aggregated rows:', JSON.stringify(rows, null, 2));
-    // Build blocks: header, export button, then one section per barcode
+    const count = rows.length;
+    const lastRefreshed = new Date().toLocaleString('en-US', {
+      timeZone: 'America/New_York',
+      dateStyle: 'short',
+      timeStyle: 'short'
+    });
     const blocks = [
       { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Summary' } },
+      {
+        type: 'context',
+        elements: [
+          { type: 'mrkdwn', text: `*${count} SKUs backordered* • Last refreshed: ${lastRefreshed}` }
+        ]
+      },
+      { type: 'divider' },
       {
         type: 'actions',
         elements: [
@@ -610,16 +660,22 @@ module.exports = function registerSlackCommands(slackApp) {
             action_id: 'download_csv'
           }
         ]
-      }
+      },
+      { type: 'divider' }
     ];
     for (const r of rows) {
       blocks.push({
         type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `${r.barcode || 'N/A'} • ${r.title} • Oldest: ${new Date(r.oldest).toLocaleDateString()} • Newest: ${new Date(r.newest).toLocaleDateString()} • Qty: ${r.total_open_qty} • Vendor: ${r.vendor || 'N/A'}`
-        }
+        fields: [
+          { type: 'mrkdwn', text: `*ISBN:*\n${r.barcode || 'N/A'}` },
+          { type: 'mrkdwn', text: `*Title:*\n${r.title}` },
+          { type: 'mrkdwn', text: `*Oldest:*\n${new Date(r.oldest).toLocaleDateString()}` },
+          { type: 'mrkdwn', text: `*Newest:*\n${new Date(r.newest).toLocaleDateString()}` },
+          { type: 'mrkdwn', text: `*Qty:*\n${r.total_open_qty}` },
+          { type: 'mrkdwn', text: `*Vendor:*\n${r.vendor || 'N/A'}` }
+        ]
       });
+      blocks.push({ type: 'divider' });
     }
     console.log('Aggregated blocks count:', blocks.length);
     return blocks;
