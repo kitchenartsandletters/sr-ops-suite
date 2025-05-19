@@ -581,7 +581,7 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
     await ack();
     try {
-      // Query aggregated open backorders
+      // Aggregated query: one row per barcode
       const res = await db.query(`
         SELECT
           product_barcode AS barcode,
@@ -606,19 +606,21 @@ module.exports = function registerSlackCommands(slackApp) {
         });
       }
 
-      // Build blocks: one Export CSV button + one line per SKU
-      const blocks = [];
-      blocks.push({
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Export CSV' },
-            url: `${process.env.SR_APP_URL}/export/backorders-list`,
-            action_id: 'download_csv'
-          }
-        ]
-      });
+      // Build blocks: one Export CSV button + one section per barcode
+      const blocks = [
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Export CSV' },
+              url: `${process.env.SR_APP_URL}/export/backorders-list`,
+              action_id: 'download_csv'
+            }
+          ]
+        }
+      ];
+
       for (const r of rows) {
         blocks.push({
           type: 'section',
