@@ -832,31 +832,32 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*Newest:*\n\`${new Date(r.newest).toLocaleDateString()}\`` },
           { type: 'mrkdwn', text: `*Qty:*\n\`${r.total_open_qty}\`` },
           { type: 'mrkdwn', text: `*Vendor:*\n\`${r.vendor || 'N/A'}\`` },
-          { type: 'mrkdwn', text: `*ETA:*\n\`${r.eta_date ? new Date(r.eta_date).toLocaleDateString() : '—'}\`` }
+          // Only include ETA field if r.eta_date is truthy
+          ...(r.eta_date
+            ? [{ type: 'mrkdwn', text: `*ETA:*\n\`${new Date(r.eta_date).toLocaleDateString()}\`` }]
+            : [])
         ]
       });
       // Only insert aggregated actions block if r.barcode is truthy
       if (r.barcode) {
-        blocks.splice(blocks.length, 0,
+        const actions = [
           {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: { type: 'plain_text', text: 'Update ETA' },
-                action_id: 'agg_update_eta',
-                value: r.barcode
-              },
-              {
-                type: 'button',
-                text: { type: 'plain_text', text: 'Clear ETA' },
-                style: 'danger',
-                action_id: 'agg_clear_eta',
-                value: r.barcode
-              }
-            ]
+            type: 'button',
+            text: { type: 'plain_text', text: 'Update ETA' },
+            action_id: 'agg_update_eta',
+            value: r.barcode
           }
-        );
+        ];
+        if (r.eta_date) {
+          actions.push({
+            type: 'button',
+            text: { type: 'plain_text', text: 'Clear ETA' },
+            style: 'danger',
+            action_id: 'agg_clear_eta',
+            value: r.barcode
+          });
+        }
+        blocks.splice(blocks.length, 0, { type: 'actions', elements: actions });
       }
       blocks.push({ type: 'divider' });
     }
