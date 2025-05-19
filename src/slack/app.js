@@ -768,4 +768,60 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     })();
   });
+
+  /**
+   * Marks all line items on a given order as fulfilled.
+   * Usage: /sr-fulfill-order <orderId>
+   */
+  slackApp.command('/sr-fulfill-order', async ({ ack, body, respond }) => {
+    await ack();
+    const orderId = body.text.trim();
+    if (!orderId) {
+      return await respond('Usage: /sr-fulfill-order <orderId>');
+    }
+    try {
+      const result = await db.query(
+        `UPDATE order_line_backorders
+           SET status = 'closed',
+               override_flag = TRUE,
+               override_reason = 'Manually marked fulfilled',
+               override_ts = NOW()
+         WHERE order_id = $1`,
+        [orderId]
+      );
+      await respond(`✅ Fulfilled order ${orderId}. Rows affected: ${result.rowCount}`);
+    } catch (err) {
+      console.error('Error fulfilling order:', err);
+      await respond('❌ Failed to fulfill order.');
+    }
+  });
+
+  /**
+   * Marks a specific ISBN on a given order as fulfilled.
+   * Usage: /sr-fulfill-item <orderId> <ISBN>
+   */
+  slackApp.command('/sr-fulfill-item', async ({ ack, body, respond }) => {
+    await ack();
+    const parts = body.text.trim().split(/\s+/);
+    const [orderId, barcode] = parts;
+    if (!orderId || !barcode) {
+      return await respond('Usage: /sr-fulfill-item <orderId> <ISBN>');
+    }
+    try {
+      const result = await db.query(
+        `UPDATE order_line_backorders
+           SET status = 'closed',
+               override_flag = TRUE,
+               override_reason = 'Manually marked fulfilled',
+               override_ts = NOW()
+         WHERE order_id = $1
+           AND product_barcode = $2`,
+        [orderId, barcode]
+      );
+      await respond(`✅ Fulfilled ISBN ${barcode} on order ${orderId}. Rows affected: ${result.rowCount}`);
+    } catch (err) {
+      console.error('Error fulfilling item:', err);
+      await respond('❌ Failed to fulfill item.');
+    }
+  });
 };
