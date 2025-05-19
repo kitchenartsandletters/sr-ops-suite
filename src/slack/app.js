@@ -698,43 +698,44 @@ module.exports = function registerSlackCommands(slackApp) {
           type: 'mrkdwn',
           text:
             '*sr-ops-suite*\n\n' +
-            '`sr-ops-suite` is a suite of Slack applications for shipping and receiving workflows. The “sr” prefix stands for `Shipping & Receiving`. Tools in the suite will help communicate about backorders, preorders, daily inventory tracking, order collection and exports—all without leaving Slack.\n\n' +
-            '---\n\n' +
-            '*What It Does*\n\n' +
-            '- *Backorders Dashboard* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
-            '- *Display Current Backorders* (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n' +
-            '- *Update ETA* (`/sr-update-eta`): Update the estimated arrival date for a backordered item.\n' +
-            '- *Fulfill ISBN* (`/sr-fulfill-isbn`): Mark all open backorders for a given ISBN as fulfilled.\n' +
-            '- *Override Backorder* (`/sr-override`): Manually override a backorder entry’s status.\n' +
-            '- *Fulfilled List* (`/sr-fulfilled-list`): List the last 10 items manually marked fulfilled.\n' +
-            '- *Undo Fulfillment* (`/sr-undo`): Undo a specific manually marked fulfilled entry.\n' +
-            '- *Quick Backorder Summary* (`/sr-back-list`): One-line-per-SKU summary with CSV export.\n' +
-            '- *Fulfill Orders* (`/sr-fulfill-order`): Bulk order fulfillment by order number.\n' +
-            '- *Fulfill Items* (`/sr-fulfill-item`): Fulfill a specific ISBN on an order.\n' +
-            '- *Export CSV* (button in App Home): Download full backorders list as a CSV.\n\n' +
-            '> *Note:* Although slash commands can be run in any channel or DM, the `#sr-backorders` channel is intended for team-wide communication. Other commands may be used anywhere.\n\n' +
-            '---\n\n' +
-            '*Installing in Slack*\n' +
-            '1. Desktop: Go to App Directory → Add apps → search “sr-ops-suite” → Add to Slack.\n' +
-            '2. Mobile: Tap Apps (•••) → search “sr-ops-suite” → install.\n\n' +
-            '*Using Slash Commands*\n' +
-            '- `/sr-back [sortKey]` – Detailed, paginated backorders (e.g. `/sr-back sort:title`).\n' +
-            '- `/sr-back-list` – Quick summary (e.g. `/sr-back-list`).\n' +
-            '- `/sr-fulfilled-list` – List recently fulfilled items (e.g. `/sr-fulfilled-list`).\n' +
-            '- `/sr-fulfill-item [orderId] [isbn]` – Fulfill specific ISBN (e.g. `/sr-fulfill-item 60166 9780316580915`).\n' +
-            '- `/sr-fulfill-order [orderId]` – Bulk fulfill order (e.g. `/sr-fulfill-order 60166`).\n' +
-            '- `/sr-fulfill-isbn [isbn]` – Fulfill all for ISBN (e.g. `/sr-fulfill-isbn 9780316580915`).\n' +
-            '- `/sr-override [orderId] [lineItemId] [action] [reason]` – Override backorder (e.g. `/sr-override 60166 13059031040133 clear preorder`).\n' +
-            '- `/sr-undo [overrideId]` – Undo fulfillment (e.g. `/sr-undo 1`).\n' +
-            '- `/sr-update-eta [orderId] [isbn] [date]` – Update ETA (e.g. `/sr-update-eta 60166 9780316580915 06/01/2025`).\n\n' +
-            '*How App Home Works*\n' +
-            '- App Home under Apps → sr-ops-suite. Use `/sr-back` or `/sr-back-list` to refresh.\n' +
-            '- Other commands display ephemeral messages.\n\n' +
-            '*Views*\n' +
-            '- Detailed (`/sr-back`): pagination, sorting, actions.\n' +
-            '- Quick (`/sr-back-list`): one-line summary, CSV export.\n\n' +
-            '*Ephemeral vs Visible Blocks*\n' +
-            '- Ephemeral: only visible to you.\n' +
+            '`sr-ops-suite` is a suite of Slack applications for shipping and receiving workflows. The “sr” prefix stands for `Shipping & Receiving`. Tools in the suite will help communicate about backorders, preorders, daily inventory tracking, order collection and exports—all without leaving Slack.\n\n\n' +
+            '---\n\n\n' +
+            '*What It Does*\n\n\n' +
+            '- *Backorders Dashboard* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n\n' +
+            '- *Display Current Backorders* (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n\n' +
+            '- *Update ETA* (`/sr-update-eta`): Update the estimated arrival date for a backordered item.\n\n' +
+            '- *Fulfill ISBN* (`/sr-fulfill-isbn`): Mark all open backorders for a given ISBN as fulfilled.\n\n' +
+            '- *Override Backorder* (`/sr-override`): Manually override a backorder entry’s status.\n\n' +
+            '- *Fulfilled List* (`/sr-fulfilled-list`): List the last 10 items manually marked fulfilled.\n\n' +
+            '- *Undo Fulfillment* (`/sr-undo`): Undo a specific manually marked fulfilled entry.\n\n' +
+            '- *Quick Backorder Summary* (`/sr-back-list`): One-line-per-SKU summary with CSV export.\n\n' +
+            '- *Fulfill Orders* (`/sr-fulfill-order`): Bulk order fulfillment by order number.\n\n' +
+            '- *Fulfill Items* (`/sr-fulfill-item`): Fulfill a specific ISBN on an order.\n\n' +
+            '- *Export CSV* (button in App Home): Download full backorders list as a CSV.\n\n\n' +
+            '> *Note:* Although slash commands can be run in any channel or DM, the `#sr-backorders` channel is intended for team-wide communication. Other commands may be used anywhere.\n\n\n' +
+            '---\n\n\n' +
+            '*Installing in Slack*\n\n\n' +
+            '1. Desktop: Go to App Directory → Add apps → search “sr-ops-suite” → Add to Slack.\n\n' +
+            '2. Mobile: Tap Apps (•••) → search “sr-ops-suite” → install.\n\n\n' +
+            '---\n\n\n' +
+            '*Using Slash Commands*\n\n\n' +
+            '- `/sr-back [sortKey]` – Detailed, paginated backorders (e.g. `/sr-back sort:title`).\n\n' +
+            '- `/sr-back-list` – Quick summary (e.g. `/sr-back-list`).\n\n' +
+            '- `/sr-fulfilled-list` – List recently fulfilled items (e.g. `/sr-fulfilled-list`).\n\n' +
+            '- `/sr-fulfill-item [orderId] [isbn]` – Fulfill specific ISBN (e.g. `/sr-fulfill-item 60166 9780316580915`).\n\n' +
+            '- `/sr-fulfill-order [orderId]` – Bulk fulfill order (e.g. `/sr-fulfill-order 60166`).\n\n' +
+            '- `/sr-fulfill-isbn [isbn]` – Fulfill all for ISBN (e.g. `/sr-fulfill-isbn 9780316580915`).\n\n' +
+            '- `/sr-override [orderId] [lineItemId] [action] [reason]` – Override backorder (e.g. `/sr-override 60166 13059031040133 clear preorder`).\n\n' +
+            '- `/sr-undo [overrideId]` – Undo fulfillment (e.g. `/sr-undo 1`).\n\n' +
+            '- `/sr-update-eta [orderId] [isbn] [date]` – Update ETA (e.g. `/sr-update-eta 60166 9780316580915 06/01/2025`).\n\n\n' +
+            '*How App Home Works*\n\n\n' +
+            '- App Home under Apps → sr-ops-suite. Use `/sr-back` or `/sr-back-list` to refresh.\n\n' +
+            '- Other commands display ephemeral messages.\n\n\n' +
+            '*Views*\n\n\n' +
+            '- Detailed (`/sr-back`): pagination, sorting, actions.\n\n' +
+            '- Quick (`/sr-back-list`): one-line summary, CSV export.\n\n\n' +
+            '*Ephemeral vs Visible Blocks*\n\n\n' +
+            '- Ephemeral: only visible to you.\n\n' +
             '- Visible: appear in channels or App Home.\n'
         }
       },
