@@ -634,6 +634,9 @@ module.exports = function registerSlackCommands(slackApp) {
       ]
     });
 
+    // DEBUG: Log blocks payload to identify invalid block structure
+    console.log('🔍 /sr-back-list blocks payload:', JSON.stringify(blocks, null, 2));
+
     // Send ephemeral message with fallback text
     await client.chat.postEphemeral({
       channel: body.channel_id,
