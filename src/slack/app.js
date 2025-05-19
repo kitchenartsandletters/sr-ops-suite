@@ -1030,6 +1030,10 @@ module.exports = function registerSlackCommands(slackApp) {
       { cmd: '/sr-fulfilled-list', desc: 'List recently fulfilled items', example: '/sr-fulfilled-list' },
       { cmd: '/sr-fulfill-item', desc: 'Fulfill a specific ISBN on an order', example: '/sr-fulfill-item 60166 9780316580915' },
       { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60166' },
+      { cmd: '/sr-fulfill-isbn', desc: 'Fulfill all items for an ISBN', example: '/sr-fulfill-isbn 9780316580915' },
+      { cmd: '/sr-back-list', desc: 'Quick backorder summary', example: '/sr-back-list' },
+      { cmd: '/sr-help', desc: 'Show this help message', example: '/sr-help' },
+      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60166' },
       { cmd: '/sr-override', desc: 'Override backorder for an order line item', example: '/sr-override 57294 13059031040133 clear preorder' },
       { cmd: '/sr-undo', desc: 'Undo a manual fulfillment', example: '/sr-undo 1' },
       { cmd: '/sr-update-eta', desc: 'Update ETA for a backorder item', example: '/sr-update-eta 60166 9780316580915 06/01/2025' }
