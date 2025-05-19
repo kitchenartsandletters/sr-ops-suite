@@ -70,8 +70,14 @@ app.get('/export/backorders-list.csv', async (req, res) => {
       `attachment; filename="backorders-list_${ts}.csv"`
     );
     let csv = 'ISBN,Title,Oldest,Newest,OpenQty,Vendor\n';
+    // Helper to format dates as MM/DD/YYYY
+    const formatDate = dateStr => {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      return `${String(d.getMonth()+1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+    };
     for (const r of rows) {
-      csv += `${r.isbn},"${r.title}",${r.oldest},${r.newest},${r.total_open_qty},"${r.vendor}"\n`;
+      csv += `${r.isbn},"${r.title}",${formatDate(r.oldest)},${formatDate(r.newest)},${r.total_open_qty},"${r.vendor}"\n`;
     }
     res.send(csv);
   } catch (err) {
