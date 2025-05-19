@@ -690,21 +690,55 @@ module.exports = function registerSlackCommands(slackApp) {
   // Handle "View Docs" button click to show README in App Home
   slackApp.action('open_docs', async ({ ack, body, client }) => {
     await ack();
-    // Build help blocks (simple indexed list)
+    // Build help blocks based on README or summary
     const helpBlocks = [
-      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite Help' } },
-      { type: 'section', text: { type: 'mrkdwn', text:
-        '*Slash Commands (alphabetical):*\n' +
-        '• `/sr-back` – Detailed, paginated backorders\n' +
-        '• `/sr-back-list` – Quick one-line-per-SKU summary\n' +
-        '• `/sr-fulfill-item` – Fulfill a specific ISBN on an order\n' +
-        '• `/sr-fulfill-order` – Fulfill all items on an order\n' +
-        '• `/sr-help` – Show this help modal\n' +
-        '• `/sr-override` – Override backorder for an order line item\n' +
-        '• `/sr-undo` – Undo a manual fulfillment\n' +
-        '• `/sr-update-eta` – Update ETA for a backorder item\n' +
-        '• `/sr-fulfilled-list` – List recently fulfilled items'
-      } }
+      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite' } },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '**sr-ops-suite** is a suite of Slack applications for shipping and receiving workflows. The “sr” prefix stands for **Shipping & Receiving**. Tools in the suite will help communicate about backorders, preorders, daily inventory tracking, order collection and exports—all without leaving Slack.'
+        }
+      },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*What It Does*' } },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text:
+            '- **Backorders Dashboard** (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
+            '- **Display Current Backorders** (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n' +
+            '- **Update ETA** (`/sr-update-eta`): Update the estimated arrival date for a backordered item.\n' +
+            '- **Fulfill ISBN** (`/sr-fulfill-isbn`): Mark all open backorders for a given ISBN as fulfilled.\n' +
+            '- **Override Backorder** (`/sr-override`): Manually override a backorder entry’s status.\n' +
+            '- **Fulfilled List** (`/sr-fulfilled-list`): List the last 10 items manually marked fulfilled.\n' +
+            '- **Undo Fulfillment** (`/sr-undo`): Undo a specific manually marked fulfilled entry.\n' +
+            '- **Quick Backorder Summary** (`/sr-back-list`): Generates a one-line-per-SKU summary of backorders with total quantities per product in App Home. CSV downloadable.\n' +
+            '- **Fulfill Orders** (`/sr-fulfill-order`): Handle bulk order fulfillment by order number.\n' +
+            '- **Fulfill Items** (`/sr-fulfill-item`): Fulfill a specific ISBN on a given order.\n' +
+            '- **Export CSV** (`Export CSV` button in App Home): Download the full backorders list as a CSV file.'
+        }
+      },
+      { type: 'divider' },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '**Note:** Although slash commands can be run in any channel or DM, the `#sr-backorders` Slack channel is intended for team-wide communication and notifications. Other commands may be run in any channel or DM as needed.'
+        }
+      },
+      { type: 'divider' },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Back to Dashboard' },
+            action_id: 'back_to_dashboard'
+          }
+        ]
+      }
     ];
     // Publish docs view
     await client.views.publish({
@@ -715,6 +749,18 @@ module.exports = function registerSlackCommands(slackApp) {
         blocks: helpBlocks
       }
     });
+  });
+
+  // Handle "Back to Dashboard" button in docs
+  slackApp.action('back_to_dashboard', async ({ ack, body, client }) => {
+    await ack();
+    // Determine whether to show aggregated or detailed based on metadata
+    const metadata = JSON.parse(body.view.private_metadata || '{}');
+    if (metadata.aggregated) {
+      await publishAggregatedHomeView(body.user.id, client);
+    } else {
+      await publishBackordersHomeView(body.user.id, client, metadata.page || 1, metadata.sortKey || 'age');
+    }
   });
   // Build aggregated blocks: one row per ISBN
   async function buildAggregatedBlocks() {
@@ -876,17 +922,17 @@ module.exports = function registerSlackCommands(slackApp) {
     await ack();
     // Build modal blocks
     const commands = [
-      { cmd: '/sr-back', desc: 'Detailed, paginated backorders' },
-      { cmd: '/sr-back-list', desc: 'Quick one-line-per-SKU summary' },
-      { cmd: '/sr-fulfill-item', desc: 'Fulfill a specific ISBN on an order' },
-      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order' },
-      { cmd: '/sr-override', desc: 'Override backorder for an order line item' },
-      { cmd: '/sr-undo', desc: 'Undo a manual fulfillment' },
-      { cmd: '/sr-update-eta', desc: 'Update ETA for a backorder item' },
-      { cmd: '/sr-fulfilled-list', desc: 'List recently fulfilled items' }
+      { cmd: '/sr-back', desc: 'Detailed, paginated backorders', example: '/sr-back 2 title' },
+      { cmd: '/sr-back-list', desc: 'Quick one-line-per-SKU summary', example: '/sr-back-list' },
+      { cmd: '/sr-fulfilled-list', desc: 'List recently fulfilled items', example: '/sr-fulfilled-list' },
+      { cmd: '/sr-fulfill-item', desc: 'Fulfill a specific ISBN on an order', example: '/sr-fulfill-item 60166 9780316580915' },
+      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60166' },
+      { cmd: '/sr-override', desc: 'Override backorder for an order line item', example: '/sr-override 57294 13059031040133 clear preorder' },
+      { cmd: '/sr-undo', desc: 'Undo a manual fulfillment', example: '/sr-undo 1' },
+      { cmd: '/sr-update-eta', desc: 'Update ETA for a backorder item', example: '/sr-update-eta 60166 9780316580915 06/01/2025' }
     ];
     commands.sort((a, b) => a.cmd.localeCompare(b.cmd));
-    const lines = commands.map(c => `• \`${c.cmd}\` – ${c.desc}`).join('\n');
+    const lines = commands.map(c => `• \`${c.cmd}\` – ${c.desc} (_Example: \`${c.example}\`_)`).join('\n');
     await client.views.open({
       trigger_id: body.trigger_id,
       view: {
