@@ -4,6 +4,23 @@ const { Pool } = require('pg');
 const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
+// Helper to generate EDT timestamp for filenames
+function formatEDT() {
+  const now = new Date().toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  const [datePart, timePart] = now.split(', ');
+  const filenameDate = datePart.replace(/\//g, '');
+  const filenameTime = timePart.replace(/:/g, '');
+  return `${filenameDate}_${filenameTime}`;
+}
+
 const PAGE_SIZE = 10;
 
 /**
