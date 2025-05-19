@@ -91,12 +91,10 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // When a user opens the App Home, publish their dashboard
-  slackApp.event('app_home_opened', async ({ event, ack, client }) => {
-    await ack();
+  slackApp.event('app_home_opened', async ({ event, client }) => {
     // background view publish
     (async () => {
       try {
-        // Only publish default view if no private_metadata (first open)
         if (!event.view?.private_metadata) {
           await publishBackordersHomeView(event.user, client, 1, 'age');
         }
