@@ -4,22 +4,6 @@ const { Pool } = require('pg');
 const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
-// Helper to generate EDT timestamp for filenames
-function formatEDT() {
-  const now = new Date().toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-  const [datePart, timePart] = now.split(', ');
-  const filenameDate = datePart.replace(/\//g, '');
-  const filenameTime = timePart.replace(/:/g, '');
-  return `${filenameDate}_${filenameTime}`;
-}
 
 const PAGE_SIZE = 10;
 
@@ -28,6 +12,22 @@ const PAGE_SIZE = 10;
  * @param {import('@slack/bolt').App} slackApp
  */
 module.exports = function registerSlackCommands(slackApp) {
+  // Helper to generate EDT timestamp for filenames
+  function formatEDT() {
+    const now = new Date().toLocaleString('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const [datePart, timePart] = now.split(', ');
+    const filenameDate = datePart.replace(/\//g, '');
+    const filenameTime = timePart.replace(/:/g, '');
+    return `${filenameDate}_${filenameTime}`;
+  }
   const client = slackApp.client;
 
   // When a user opens the App Home, publish their dashboard
@@ -628,7 +628,8 @@ module.exports = function registerSlackCommands(slackApp) {
         {
           type: 'button',
           text: { type: 'plain_text', text: 'Download CSV' },
-          url:  `${process.env.SR_APP_URL}/export/backorders-list_${formatEDT()}.csv`
+          url:  `${process.env.SR_APP_URL}/export/backorders-list_${formatEDT()}.csv`,
+          action_id: 'download_csv'
         }
       ]
     });
