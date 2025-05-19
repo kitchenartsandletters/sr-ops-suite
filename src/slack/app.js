@@ -52,7 +52,7 @@ module.exports = function registerSlackCommands(slackApp) {
          AND override_flag = FALSE
          AND initial_available < 0
     `);
-    const total = parseInt(countRes.rows[0].total, 10);
+    const total = parseInt(countRes``.rows[0].total, 10);
     if (total === 0) {
       return { blocks: null, totalPages: 1, total, rows: [] };
     }
@@ -591,6 +591,7 @@ module.exports = function registerSlackCommands(slackApp) {
       FROM order_line_backorders
       WHERE status = 'open'
         AND override_flag = FALSE
+        AND initial_available < 0
       GROUP BY product_barcode, product_title, product_vendor
       ORDER BY total_open_qty DESC
     `);
