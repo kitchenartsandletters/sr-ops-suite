@@ -70,16 +70,20 @@ module.exports = function registerSlackCommands(slackApp) {
       res.status(500).send('Internal Server Error');
     }
   });
-  // Debug: dump registered routes
-  const routes = slackApp.receiver.app._router.stack
-    .filter(r => r.route && r.route.path)
-    .map(r => `${Object.keys(r.route.methods).join(',').toUpperCase()} ${r.route.path}`);
-  console.log('Registered routes:', routes);
-  // Debug: log all incoming requests
-  slackApp.receiver.app.use((req, res, next) => {
-    console.log('Incoming request:', req.method, req.originalUrl);
-    next();
-  });
+  // Debug: dump registered routes and log all incoming requests
+  if (slackApp.receiver.app && slackApp.receiver.app._router) {
+    const routes = slackApp.receiver.app._router.stack
+      .filter(r => r.route && r.route.path)
+      .map(r => `${Object.keys(r.route.methods).join(',').toUpperCase()} ${r.route.path}`);
+    console.log('Registered routes:', routes);
+    // Debug: log all incoming requests
+    slackApp.receiver.app.use((req, res, next) => {
+      console.log('Incoming request:', req.method, req.originalUrl);
+      next();
+    });
+  } else {
+    console.warn('Express app router not available for route dumping.');
+  }
 
   // When a user opens the App Home, publish their dashboard
   slackApp.event('app_home_opened', async ({ event, client }) => {
