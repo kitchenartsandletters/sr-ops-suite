@@ -70,6 +70,11 @@ module.exports = function registerSlackCommands(slackApp) {
       res.status(500).send('Internal Server Error');
     }
   });
+
+  // Health check endpoint
+  slackApp.receiver.app.get('/healthz', (req, res) => {
+    res.status(200).send('OK');
+  });
   // Debug: dump registered routes and log all incoming requests
   if (slackApp.receiver.app && slackApp.receiver.app._router) {
     const routes = slackApp.receiver.app._router.stack
