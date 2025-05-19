@@ -636,19 +636,42 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
-  // Handle ETA modal submission
+  // Handle ETA modal submission (supports both per-line and aggregated SKU)
   slackApp.view('update_eta_submit', async ({ ack, body, client }) => {
     await ack();
     const metadata = body.view.private_metadata;
-    const [orderId, lineItemId] = metadata.split('|');
-    const etaDate = body.view.state.values.eta_input.eta_action.selected_date;
+    const [prefix, id] = metadata.split('|');
+    const etaDate =
+      (body.view.state.values.eta_input.eta_action.selected_date
+        || body.view.state.values.eta_input.eta_action.value); // handle slash vs modal input
     try {
-      await db.query(
-        `UPDATE order_line_backorders SET eta_date = $1 WHERE order_id = $2 AND line_item_id = $3`,
-        [etaDate, orderId, lineItemId]
-      );
-      // Refresh Home view for user
-      await publishBackordersHomeView(body.user.id, client);
+      if (prefix === 'agg') {
+        // aggregated SKU
+        await db.query(
+          `UPDATE order_line_backorders
+             SET eta_date = $1
+           WHERE product_barcode = $2
+             AND status = 'open'
+             AND override_flag = FALSE`,
+          [etaDate, id]
+        );
+        // confirm and refresh
+        await client.chat.postEphemeral({
+          channel: body.user.id,
+          user: body.user.id,
+          text: `✅ Set ETA (${etaDate}) for ISBN ${id} on all backorders.`
+        });
+        await publishAggregatedHomeView(body.user.id, client);
+      } else {
+        // existing per-line logic using orderId=id and lineItemId...
+        const [orderId, lineItemId] = metadata.split('|');
+        await db.query(
+          `UPDATE order_line_backorders SET eta_date = $1 WHERE order_id = $2 AND line_item_id = $3`,
+          [etaDate, orderId, lineItemId]
+        );
+        // Refresh Home view for user
+        await publishBackordersHomeView(body.user.id, client);
+      }
     } catch (err) {
       console.error('Error saving ETA date:', err);
     }
@@ -761,6 +784,7 @@ module.exports = function registerSlackCommands(slackApp) {
         product_vendor    AS vendor,
         MIN(order_date)::date AS oldest,
         MAX(order_date)::date AS newest,
+        MIN(eta_date)::date AS eta_date,
         SUM(ordered_qty)  AS total_open_qty
       FROM order_line_backorders
       WHERE status = 'open'
@@ -807,13 +831,77 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*Oldest:*\n\`${new Date(r.oldest).toLocaleDateString()}\`` },
           { type: 'mrkdwn', text: `*Newest:*\n\`${new Date(r.newest).toLocaleDateString()}\`` },
           { type: 'mrkdwn', text: `*Qty:*\n\`${r.total_open_qty}\`` },
-          { type: 'mrkdwn', text: `*Vendor:*\n\`${r.vendor || 'N/A'}\`` }
+          { type: 'mrkdwn', text: `*Vendor:*\n\`${r.vendor || 'N/A'}\`` },
+          { type: 'mrkdwn', text: `*ETA:*\n\`${r.eta_date ? new Date(r.eta_date).toLocaleDateString() : '—'}\`` }
         ]
       });
+      // Add aggregated actions block before divider
+      blocks.splice(blocks.length, 0,
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Update ETA' },
+              action_id: 'agg_update_eta',
+              value: r.barcode
+            },
+            {
+              type: 'button',
+              text: { type: 'plain_text', text: 'Clear ETA' },
+              style: 'danger',
+              action_id: 'agg_clear_eta',
+              value: r.barcode
+            }
+          ]
+        }
+      );
       blocks.push({ type: 'divider' });
     }
     return blocks;
   }
+  /**
+   * Update ETA via slash command.
+   * Usage: /sr-update-eta <orderId> <isbn> <YYYY-MM-DD>
+   *    or: /sr-update-eta <isbn> <YYYY-MM-DD>
+   */
+  slackApp.command('/sr-update-eta', async ({ ack, body, respond }) => {
+    await ack();
+    const parts = body.text.trim().split(/\s+/);
+    let orderId, isbn, etaDate;
+    if (parts.length === 3) {
+      [orderId, isbn, etaDate] = parts;
+      orderId = orderId.startsWith('#') ? orderId : `#${orderId}`;
+    } else if (parts.length === 2) {
+      [isbn, etaDate] = parts;
+    } else {
+      return await respond('Usage: `/sr-update-eta <orderId> <isbn> <YYYY-MM-DD>` or `/sr-update-eta <isbn> <YYYY-MM-DD>`');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(etaDate)) {
+      return await respond('Date must be in `YYYY-MM-DD` format.');
+    }
+    // Build query
+    let sql = `
+      UPDATE order_line_backorders
+         SET eta_date = $1
+       WHERE product_barcode = $2
+         AND status = 'open'
+         AND override_flag = FALSE
+    `;
+    const params = [etaDate, isbn];
+    if (orderId) {
+      sql += ' AND order_id = $3';
+      params.push(orderId);
+    }
+    try {
+      const result = await db.query(sql, params);
+      await respond(`✅ Updated ETA (${etaDate}) for ${result.rowCount} row(s).`);
+    } catch (err) {
+      console.error('Error updating ETA via slash:', err);
+      await respond('❌ Failed to update ETA. Check your inputs.');
+    }
+  });
+
 
   // Publish aggregated blocks to the App Home
   async function publishAggregatedHomeView(userId, client) {
@@ -949,3 +1037,56 @@ module.exports = function registerSlackCommands(slackApp) {
     });
   });
 };
+  // Aggregated Update ETA
+  slackApp.action('agg_update_eta', async ({ ack, body, client }) => {
+    await ack();
+    const isbn = body.actions[0].value;
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'update_eta_submit',
+        private_metadata: `agg|${isbn}`,
+        title: { type: 'plain_text', text: 'Set ETA for SKU' },
+        submit: { type: 'plain_text', text: 'Save' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'eta_input',
+            label: { type: 'plain_text', text: 'ETA date (YYYY-MM-DD)' },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'eta_action',
+              placeholder: { type: 'plain_text', text: 'YYYY-MM-DD' }
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  // Aggregated Clear ETA
+  slackApp.action('agg_clear_eta', async ({ ack, body, client }) => {
+    await ack();
+    const isbn = body.actions[0].value;
+    try {
+      const result = await db.query(
+        `UPDATE order_line_backorders
+           SET eta_date = NULL
+         WHERE product_barcode = $1
+           AND status = 'open'
+           AND override_flag = FALSE`,
+        [isbn]
+      );
+      // Notify user and refresh summary
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: `✅ Cleared ETA for ${result.rowCount} row(s) of ISBN ${isbn}.`
+      });
+      await publishAggregatedHomeView(body.user.id, client);
+    } catch (err) {
+      console.error('Error clearing aggregated ETA:', err);
+    }
+  });
