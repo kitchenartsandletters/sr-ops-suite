@@ -720,19 +720,19 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // Aggregated backorders summary to App Home
-  slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
+  slackApp.command('/sr-back-list', async ({ ack, command, client }) => {
     await ack();
     // Fire-and-forget background processing
     (async () => {
       try {
         // Notify user
         await client.chat.postEphemeral({
-          channel: body.channel_id,
-          user: body.user_id,
+          channel: command.channel_id,
+          user: command.user_id,
           text: 'Publishing aggregated backorders summary to your App Home...',
         });
         // Publish summary
-        await publishAggregatedHomeView(body.user_id, client);
+        await publishAggregatedHomeView(command.user_id, client);
       } catch (err) {
         console.error('Error handling /sr-back-list in background:', err);
       }
