@@ -776,6 +776,8 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.command('/sr-fulfill-order', async ({ ack, body, respond }) => {
     await ack();
     const orderId = body.text.trim();
+    // Normalize human-friendly order number to include leading '#'
+    const normalizedOrderId = orderId.startsWith('#') ? orderId : `#${orderId}`;
     if (!orderId) {
       return await respond('Usage: /sr-fulfill-order <orderId>');
     }
@@ -787,9 +789,9 @@ module.exports = function registerSlackCommands(slackApp) {
                override_reason = 'Manually marked fulfilled',
                override_ts = NOW()
          WHERE order_id = $1`,
-        [orderId]
+        [normalizedOrderId]
       );
-      await respond(`✅ Fulfilled order ${orderId}. Rows affected: ${result.rowCount}`);
+      await respond(`✅ Fulfilled order ${normalizedOrderId}. Rows affected: ${result.rowCount}`);
     } catch (err) {
       console.error('Error fulfilling order:', err);
       await respond('❌ Failed to fulfill order.');
@@ -804,6 +806,8 @@ module.exports = function registerSlackCommands(slackApp) {
     await ack();
     const parts = body.text.trim().split(/\s+/);
     const [orderId, barcode] = parts;
+    // Normalize human-friendly order number to include leading '#'
+    const normalizedOrderId = orderId && orderId.startsWith('#') ? orderId : `#${orderId}`;
     if (!orderId || !barcode) {
       return await respond('Usage: /sr-fulfill-item <orderId> <ISBN>');
     }
@@ -816,9 +820,9 @@ module.exports = function registerSlackCommands(slackApp) {
                override_ts = NOW()
          WHERE order_id = $1
            AND product_barcode = $2`,
-        [orderId, barcode]
+        [normalizedOrderId, barcode]
       );
-      await respond(`✅ Fulfilled ISBN ${barcode} on order ${orderId}. Rows affected: ${result.rowCount}`);
+      await respond(`✅ Fulfilled ISBN ${barcode} on order ${normalizedOrderId}. Rows affected: ${result.rowCount}`);
     } catch (err) {
       console.error('Error fulfilling item:', err);
       await respond('❌ Failed to fulfill item.');
