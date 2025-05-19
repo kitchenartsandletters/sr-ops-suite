@@ -1036,7 +1036,7 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   });
-};
+
   // Aggregated Update ETA
   slackApp.action('agg_update_eta', async ({ ack, body, client }) => {
     await ack();
@@ -1090,3 +1090,4 @@ module.exports = function registerSlackCommands(slackApp) {
       console.error('Error clearing aggregated ETA:', err);
     }
   });
+};
