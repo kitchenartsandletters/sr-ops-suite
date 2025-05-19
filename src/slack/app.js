@@ -595,6 +595,7 @@ module.exports = function registerSlackCommands(slackApp) {
       ORDER BY total_open_qty DESC
     `);
     const rows = res.rows;
+    console.log('Aggregated rows:', JSON.stringify(rows, null, 2));
     // Build blocks: header, export button, then one section per barcode
     const blocks = [
       { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Summary' } },
@@ -619,6 +620,7 @@ module.exports = function registerSlackCommands(slackApp) {
         }
       });
     }
+    console.log('Aggregated blocks count:', blocks.length);
     return blocks;
   }
 
