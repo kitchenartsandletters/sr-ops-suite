@@ -54,7 +54,7 @@ module.exports = function registerSlackCommands(slackApp) {
     `);
     const total = parseInt(countRes.rows[0].total, 10);
     if (total === 0) {
-      return { blocks: null, totalPages: 1, total };
+      return { blocks: null, totalPages: 1, total, rows: [] };
     }
     const offset = (page - 1) * PAGE_SIZE;
 
@@ -211,7 +211,7 @@ module.exports = function registerSlackCommands(slackApp) {
         }
       ]
     });
-    return { blocks, totalPages, total };
+    return { blocks, totalPages, total, rows };
   }
 
   // Backorders report (paginated)
@@ -566,7 +566,8 @@ module.exports = function registerSlackCommands(slackApp) {
    */
   async function publishBackordersHomeView(userId, client, page = 1, sortKey = 'age') {
     // Build blocks for the requested page and sortKey
-    const { blocks } = await buildBackordersBlocks(page, sortKey);
+    const { blocks, rows } = await buildBackordersBlocks(page, sortKey);
+    console.log('Paged backorders rows:', JSON.stringify(rows, null, 2));
     // Publish the view (blocks already have header/context/divider)
     await client.views.publish({
       user_id: userId,
