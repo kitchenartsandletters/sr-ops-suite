@@ -1137,9 +1137,9 @@ module.exports = function registerSlackCommands(slackApp) {
       console.error('Error in agg_mark_fulfilled:', err);
     }
   });
-};
   // Aggregated Sort by Title
   slackApp.action('agg_sort_title', async ({ ack, body, client }) => {
     await ack();
     await publishAggregatedHomeView(body.user.id, client, 'title');
   });
+};
