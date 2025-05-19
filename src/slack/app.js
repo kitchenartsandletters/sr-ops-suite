@@ -606,8 +606,12 @@ module.exports = function registerSlackCommands(slackApp) {
         });
       }
 
-      // Build blocks: one Export CSV button + one section per barcode
+      // Build blocks: header, one Export CSV button, then one section per barcode
       const blocks = [
+        {
+          type: 'header',
+          text: { type: 'plain_text', text: '📦 Backorders Dashboard' }
+        },
         {
           type: 'actions',
           elements: [
