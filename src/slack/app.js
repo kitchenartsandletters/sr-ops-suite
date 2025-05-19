@@ -635,12 +635,19 @@ module.exports = function registerSlackCommands(slackApp) {
         });
       }
 
-      // Send ephemeral dashboard
+      // Publish dashboard to App Home
+      await client.views.publish({
+        user_id: body.user_id,
+        view: {
+          type: 'home',
+          blocks
+        }
+      });
+      // Optionally inform the user
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
-        text: 'Open backorders dashboard',
-        blocks
+        text: 'Backorders dashboard published to App Home.'
       });
 
     } catch (err) {
