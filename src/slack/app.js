@@ -676,7 +676,7 @@ module.exports = function registerSlackCommands(slackApp) {
             elements: [
               {
                 type: 'button',
-                text: { type: 'plain_text', text: 'View Docs' },
+                text: { type: 'plain_text', text: 'View Help Docs' },
                 action_id: 'open_docs'
               }
             ]
