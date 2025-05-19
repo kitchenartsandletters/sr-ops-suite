@@ -823,7 +823,19 @@ module.exports = function registerSlackCommands(slackApp) {
       view: {
         type: 'home',
         private_metadata: 'aggregated',
-        blocks
+        blocks: [
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'View Help Docs' },
+                action_id: 'open_docs'
+              }
+            ]
+          },
+          ...blocks
+        ]
       }
     });
   }
