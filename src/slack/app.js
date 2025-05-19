@@ -728,12 +728,15 @@ module.exports = function registerSlackCommands(slackApp) {
             '- `/sr-override [orderId] [lineItemId] [action] [reason]` – Override backorder (e.g. `/sr-override 60166 13059031040133 clear preorder`).\n\n' +
             '- `/sr-undo [overrideId]` – Undo fulfillment (e.g. `/sr-undo 1`).\n\n' +
             '- `/sr-update-eta [orderId] [isbn] [date]` – Update ETA (e.g. `/sr-update-eta 60166 9780316580915 06/01/2025`).\n\n\n' +
+            '---\n\n\n' +
             '*How App Home Works*\n\n\n' +
             '- App Home under Apps → sr-ops-suite. Use `/sr-back` or `/sr-back-list` to refresh.\n\n' +
             '- Other commands display ephemeral messages.\n\n\n' +
+            '---\n\n\n' +
             '*Views*\n\n\n' +
             '- Detailed (`/sr-back`): pagination, sorting, actions.\n\n' +
             '- Quick (`/sr-back-list`): one-line summary, CSV export.\n\n\n' +
+            '---\n\n\n' +
             '*Ephemeral vs Visible Blocks*\n\n\n' +
             '- Ephemeral: only visible to you.\n\n' +
             '- Visible: appear in channels or App Home.\n'
