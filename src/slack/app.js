@@ -844,14 +844,14 @@ module.exports = function registerSlackCommands(slackApp) {
               type: 'button',
               text: { type: 'plain_text', text: 'Update ETA' },
               action_id: 'agg_update_eta',
-              value: r.barcode
+              value: String(r.barcode || '')
             },
             {
               type: 'button',
               text: { type: 'plain_text', text: 'Clear ETA' },
               style: 'danger',
               action_id: 'agg_clear_eta',
-              value: r.barcode
+              value: String(r.barcode || '')
             }
           ]
         }
