@@ -560,8 +560,6 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   }
-};
-
   /**
    * List the last 10 backorders for easy undo.
    * Usage: /sr-back-list
@@ -605,3 +603,4 @@ module.exports = function registerSlackCommands(slackApp) {
       });
     }
   });
+};
