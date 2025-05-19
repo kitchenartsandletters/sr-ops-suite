@@ -80,6 +80,12 @@ app.get('/export/backorders-list.csv', async (req, res) => {
   }
 });
 
+// Redirect non-.csv export to .csv endpoint
+app.get('/export/backorders-list', (req, res) => {
+  res.redirect(301, '/export/backorders-list.csv');
+});
+
+
 // Full backorders export
 app.get('/export/backorders.csv', async (req, res) => {
   try {
