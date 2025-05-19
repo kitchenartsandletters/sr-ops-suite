@@ -715,35 +715,71 @@ module.exports = function registerSlackCommands(slackApp) {
     await ack();
     // Build modal blocks with full command examples and help
     const modalBlocks = [
-      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite Help', emoji: true } },
+      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite', emoji: true } },
+      { type: 'section', text: { type: 'mrkdwn', text: '*sr-ops-suite* is a suite of Slack applications for shipping and receiving workflows. The `sr` prefix stands for Shipping & Receiving. Tools in the suite will help communicate about backorders, preorders, daily inventory tracking, order collection and exports—all without leaving Slack.' } },
       { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*Slash Commands & Examples*' } },
-      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*What It Does*' } },
       { type: 'section', text: { type: 'mrkdwn', text:
-        '• `/sr-back` — Refresh detailed backorders dashboard\n' +
-        '_Example:_ `/sr-back`\n\n' +
-        '• `/sr-back sort:title` — Sort detailed view by title\n' +
-        '_Example:_ `/sr-back sort:title`\n\n' +
-        '• `/sr-back-list` — Refresh quick SKU summary\n' +
-        '_Example:_ `/sr-back-list`\n\n' +
-        '• `/sr-fulfilled-list` — List last 10 fulfilled backorders\n' +
-        '_Example:_ `/sr-fulfilled-list`\n\n' +
-        '• `/sr-fulfill-order 60641` — Mark all items on order #60641 fulfilled\n' +
-        '_Example:_ `/sr-fulfill-order 60641`\n\n' +
-        '• `/sr-fulfill-item 60641 9780316580915` — Fulfill specific ISBN on an order\n' +
-        '_Example:_ `/sr-fulfill-item 60641 9780316580915`\n\n' +
-        '• `/sr-fulfill-isbn 9780316580915` — Fulfill all backorders for an ISBN\n' +
-        '_Example:_ `/sr-fulfill-isbn 9780316580915`\n\n' +
-        '• `/sr-update-eta 60166 9780316580915 2025-06-15` — Update ETA for that order+ISBN\n' +
-        '_Example:_ `/sr-update-eta 60166 9780316580915 2025-06-15`\n\n' +
-        '• `/sr-update-eta 9780316580915 2025-06-15` — Update ETA for all backorders of that ISBN\n' +
-        '_Example:_ `/sr-update-eta 9780316580915 2025-06-15`\n\n' +
-        '• `/sr-override 57294 13059031040133 clear preorder` — Clear override flag with reason\n' +
-        '_Example:_ `/sr-override 57294 13059031040133 clear preorder`\n\n' +
-        '• `/sr-override 57294 13059031040133 hold backorder` — Set override with reason\n' +
-        '_Example:_ `/sr-override 57294 13059031040133 hold backorder`\n\n' +
-        '• `/sr-undo 3` — Undo a specific manual fulfillment (use after `/sr-fulfilled-list` to get its number)\n' +
-        '_Example:_ `/sr-undo 3`'
+          '- *Backorders Dashboard* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
+          '- *Display Current Backorders* (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n' +
+          '- *Update ETA* (`/sr-update-eta [orderNumber] [isbn] [YYYY-MM-DD]` and `/sr-update-eta [isbn] [YYYY-MM-DD]`): Update the estimated arrival date for a backordered item.\n' +
+          '  _Examples:_ `/sr-update-eta 60166 9780316580915 2025-06-01`  `/sr-update-eta 9780316580915 2025-06-01`\n' +
+          '- *Fulfill ISBN* (`/sr-fulfill-isbn`): Mark all open backorders for a given ISBN as fulfilled.\n' +
+          '- *Override Backorder* (`/sr-override [orderNumber] [lineItemId] [action] [reason]`): Manually override a backorder entry’s status.\n' +
+          '  _Example:_ `/sr-override 60166 13059031040133 clear preorder`\n' +
+          '- *Fulfilled List* (`/sr-fulfilled-list`): List the last 10 items manually marked fulfilled.\n' +
+          '  _Example:_ `/sr-fulfilled-list`\n' +
+          '- *Undo Fulfillment* (`/sr-undo [overrideNumber]`): Undo a specific manually marked fulfillment (use after `/sr-fulfilled-list`).\n' +
+          '  _Example:_ `/sr-undo 3`\n' +
+          '- *Quick Backorder Summary* (`/sr-back-list`): Generates a one-line-per-SKU summary of backorders with total quantities per product in App Home, including Export CSV.\n' +
+          '  _Example:_ `/sr-back-list`\n' +
+          '- *Fulfill Orders* (`/sr-fulfill-order [orderNumber]`): Handle bulk order fulfillment by order number.\n' +
+          '  _Example:_ `/sr-fulfill-order 60166`\n' +
+          '- *Fulfill Items* (`/sr-fulfill-item [orderNumber] [isbn]`): Fulfill a specific ISBN on a given order.\n' +
+          '  _Example:_ `/sr-fulfill-item 60166 9780316580915`\n' +
+          '- *Export CSV* (button in App Home): Download the full backorders list as a CSV file.\n' +
+          '- *Help Modal* (`/sr-help`): Open a help modal listing all available commands with examples.\n' +
+          '  _Example:_ `/sr-help`'
+      } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*Installing in Slack*' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+          '1) Desktop: App Directory → Add apps → search `sr-ops-suite` → Add to Slack\n' +
+          '2) Mobile: Apps (•••) → search `sr-ops-suite` → install'
+      } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*Using Slash Commands*' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+          '`/sr-back [sortKey]` — Detailed, paginated backorders in App Home. (_e.g._ `/sr-back`, `/sr-back sort:title`)\n' +
+          '`/sr-back-list` — Quick one-line-per-SKU summary in App Home with CSV export. (_e.g._ `/sr-back-list`)\n' +
+          '`/sr-fulfilled-list` — List last 10 fulfilled backorders. (_e.g._ `/sr-fulfilled-list`)\n' +
+          '`/sr-fulfill-order [orderNumber]` — Fulfill all items in an order. (_e.g._ `/sr-fulfill-order 60166`)\n' +
+          '`/sr-fulfill-item [orderNumber] [isbn]` — Fulfill specific ISBN on an order. (_e.g._ `/sr-fulfill-item 60166 9780316580915`)\n' +
+          '`/sr-fulfill-isbn [isbn]` — Fulfill all backorders for an ISBN. (_e.g._ `/sr-fulfill-isbn 9780316580915`)\n' +
+          '`/sr-update-eta [orderNumber] [isbn] [YYYY-MM-DD]` — Update ETA for a specific order and ISBN. (_e.g._ `/sr-update-eta 60166 9780316580915 2025-06-01`)\n' +
+          '`/sr-update-eta [isbn] [YYYY-MM-DD]` — Update ETA across all backorders of an ISBN. (_e.g._ `/sr-update-eta 9780316580915 2025-06-01`)\n' +
+          '`/sr-override [orderNumber] [lineItemId] [action] [reason]` — Override backorder entry. (_e.g._ `/sr-override 60166 13059031040133 clear preorder`)\n' +
+          '`/sr-undo [overrideNumber]` — Undo a manual fulfillment (use after `/sr-fulfilled-list`). (_e.g._ `/sr-undo 3`)\n' +
+          '`/sr-help` — Open this help modal with examples. (_e.g._ `/sr-help`)'
+      } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*How App Home Works*' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+          'App Home is your persistent dashboard under Apps → sr-ops-suite.\n' +
+          'Run `/sr-back` or `/sr-back-list` to refresh detailed or summary views.\n' +
+          'Other commands display ephemeral messages in the channel or DM.'
+      } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*Views*' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+          '1) Detailed View (`/sr-back`): pagination, sorting, and per-line actions (Sort by Title, Mark Fulfilled, Update ETA, Clear ETA).\n' +
+          '2) Quick Summary (`/sr-back-list`): one line per SKU with actions (Sort by Title, Export CSV, View Help Docs, Mark Fulfilled, Update ETA, Clear ETA).'
+      } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*Ephemeral vs. Visible Blocks*' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+          '- Ephemeral: visible only to you; used for confirmations and notices.\n' +
+          '- Visible: persist in channels or App Home; used for dashboards.'
       } },
       { type: 'divider' }
     ];
