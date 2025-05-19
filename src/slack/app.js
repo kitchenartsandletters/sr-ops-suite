@@ -582,6 +582,11 @@ module.exports = function registerSlackCommands(slackApp) {
    * Usage: /sr-back-list
    */
   slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
+    console.log('Invoked /sr-back-list command', {
+      text: body.text,
+      channel: body.channel_id,
+      user: body.user_id
+    });
     await ack();
     try {
       // Aggregate by ISBN and title
