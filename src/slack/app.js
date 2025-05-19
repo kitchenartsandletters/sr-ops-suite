@@ -713,55 +713,39 @@ module.exports = function registerSlackCommands(slackApp) {
   // Handle "View Docs" button click to show README in a modal
   slackApp.action('open_docs', async ({ ack, body, client }) => {
     await ack();
-    // Build modal blocks with full README content
+    // Build modal blocks with full command examples and help
     const modalBlocks = [
-      { type: 'section', text: { type: 'plain_text', text: 'sr-ops-suite', emoji: true } },
+      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite Help', emoji: true } },
+      { type: 'divider' },
+      { type: 'section', text: { type: 'mrkdwn', text: '*Slash Commands & Examples*' } },
+      { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text:
-        '*sr-ops-suite* is a suite of Slack apps for shipping & receiving. `sr` stands for Shipping & Receiving.\n\n' +
-        'Tools help with backorders, preorders, inventory tracking, order collection, and exports—all within Slack.'
+        '• `/sr-back` — Refresh detailed backorders dashboard\n' +
+        '_Example:_ `/sr-back`\n\n' +
+        '• `/sr-back sort:title` — Sort detailed view by title\n' +
+        '_Example:_ `/sr-back sort:title`\n\n' +
+        '• `/sr-back-list` — Refresh quick SKU summary\n' +
+        '_Example:_ `/sr-back-list`\n\n' +
+        '• `/sr-fulfilled-list` — List last 10 fulfilled backorders\n' +
+        '_Example:_ `/sr-fulfilled-list`\n\n' +
+        '• `/sr-fulfill-order 60641` — Mark all items on order #60641 fulfilled\n' +
+        '_Example:_ `/sr-fulfill-order 60641`\n\n' +
+        '• `/sr-fulfill-item 60641 9780316580915` — Fulfill specific ISBN on an order\n' +
+        '_Example:_ `/sr-fulfill-item 60641 9780316580915`\n\n' +
+        '• `/sr-fulfill-isbn 9780316580915` — Fulfill all backorders for an ISBN\n' +
+        '_Example:_ `/sr-fulfill-isbn 9780316580915`\n\n' +
+        '• `/sr-update-eta 60166 9780316580915 2025-06-15` — Update ETA for that order+ISBN\n' +
+        '_Example:_ `/sr-update-eta 60166 9780316580915 2025-06-15`\n\n' +
+        '• `/sr-update-eta 9780316580915 2025-06-15` — Update ETA for all backorders of that ISBN\n' +
+        '_Example:_ `/sr-update-eta 9780316580915 2025-06-15`\n\n' +
+        '• `/sr-override 57294 13059031040133 clear preorder` — Clear override flag with reason\n' +
+        '_Example:_ `/sr-override 57294 13059031040133 clear preorder`\n\n' +
+        '• `/sr-override 57294 13059031040133 hold backorder` — Set override with reason\n' +
+        '_Example:_ `/sr-override 57294 13059031040133 hold backorder`\n\n' +
+        '• `/sr-undo 3` — Undo a specific manual fulfillment (use after `/sr-fulfilled-list` to get its number)\n' +
+        '_Example:_ `/sr-undo 3`' + '\n' +
       } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*What It Does*' } },
-      { type: 'section', text: { type: 'mrkdwn', text:
-        '• Backorders Dashboard (`#sr-backorders` channel): team notifications.\n' +
-        '• Display Current Backorders (`/sr-back`): paginated view.\n' +
-        '• Update ETA (`/sr-update-eta`): change ETA.\n' +
-        '• Fulfill ISBN (`/sr-fulfill-isbn`): mark ISBN fulfilled.\n' +
-        '• Override Backorder (`/sr-override`): manual override.\n' +
-        '• Fulfilled List (`/sr-fulfilled-list`): list recent fulfills.\n' +
-        '• Undo Fulfillment (`/sr-undo`): undo manual fulfill.\n' +
-        '• Quick Backorder Summary (`/sr-back-list`): SKU summary with CSV.\n' +
-        '• Fulfill Orders (`/sr-fulfill-order`): bulk fulfill.\n' +
-        '• Fulfill Items (`/sr-fulfill-item`): fulfill by ISBN.\n'
-      } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*Installing in Slack*' } },
-      { type: 'section', text: { type: 'mrkdwn', text:
-        'Desktop: App Directory → Add apps → search “sr-ops-suite” → Add to Slack.\n' +
-        'Mobile: Apps (•••) → search “sr-ops-suite” → install.'
-      } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*Using Slash Commands*' } },
-      { type: 'section', text: { type: 'mrkdwn', text:
-        '• `/sr-back [sortKey]` – detailed backorders (e.g. `/sr-back sort:title`)\n' +
-        '• `/sr-back-list` – quick summary (`/sr-back-list`)\n' +
-        '• `/sr-fulfilled-list` – list recent (`/sr-fulfilled-list`)\n' +
-        '• `/sr-fulfill-item [orderId] [isbn]` – fulfill item\n' +
-        '• `/sr-fulfill-order [orderId]` – bulk fulfill\n' +
-        '• `/sr-fulfill-isbn [isbn]` – fulfill all for ISBN\n' +
-        '• `/sr-override [orderId] [lineItemId] [action] [reason]` – override\n' +
-        '• `/sr-undo [overrideId]` – undo fulfill\n' +
-        '• `/sr-update-eta [orderId] [isbn] [date]` – update ETA'
-      } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*How App Home Works*' } },
-      { type: 'section', text: { type: 'mrkdwn', text:
-        'App Home under Apps → sr-ops-suite. Use `/sr-back` or `/sr-back-list` to refresh. Other commands send ephemeral messages.'
-      } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*Views*\n• Detailed (`/sr-back`)\n• Quick (`/sr-back-list`)' } },
-      { type: 'divider' },
-      { type: 'section', text: { type: 'mrkdwn', text: '*Ephemeral vs Visible Blocks*\n• Ephemeral: only you\n• Visible: channels/App Home' } }
+      { type: 'divider' }
     ];
     await client.views.open({
       trigger_id: body.trigger_id,
@@ -1025,18 +1009,17 @@ module.exports = function registerSlackCommands(slackApp) {
     await ack();
     // Build modal blocks
     const commands = [
-      { cmd: '/sr-back', desc: 'Detailed, paginated backorders', example: '/sr-back 2 title' },
-      { cmd: '/sr-back-list', desc: 'Quick one-line-per-SKU summary', example: '/sr-back-list' },
-      { cmd: '/sr-fulfilled-list', desc: 'List recently fulfilled items', example: '/sr-fulfilled-list' },
-      { cmd: '/sr-fulfill-item', desc: 'Fulfill a specific ISBN on an order', example: '/sr-fulfill-item 60166 9780316580915' },
-      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60166' },
-      { cmd: '/sr-fulfill-isbn', desc: 'Fulfill all items for an ISBN', example: '/sr-fulfill-isbn 9780316580915' },
-      { cmd: '/sr-back-list', desc: 'Quick backorder summary', example: '/sr-back-list' },
-      { cmd: '/sr-help', desc: 'Show this help message', example: '/sr-help' },
-      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60166' },
-      { cmd: '/sr-override', desc: 'Override backorder for an order line item', example: '/sr-override 57294 13059031040133 clear preorder' },
-      { cmd: '/sr-undo', desc: 'Undo a manual fulfillment', example: '/sr-undo 1' },
-      { cmd: '/sr-update-eta', desc: 'Update ETA for a backorder item', example: '/sr-update-eta 60166 9780316580915 06/01/2025' }
+      { cmd: '/sr-back', desc: 'Refresh detailed backorders dashboard', example: '/sr-back' },
+      { cmd: '/sr-back sort:title', desc: 'Sort detailed view by title', example: '/sr-back sort:title' },
+      { cmd: '/sr-back-list', desc: 'Refresh quick SKU summary', example: '/sr-back-list' },
+      { cmd: '/sr-fulfilled-list', desc: 'List last 10 fulfilled backorders', example: '/sr-fulfilled-list' },
+      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order', example: '/sr-fulfill-order 60641' },
+      { cmd: '/sr-fulfill-item', desc: 'Fulfill specific ISBN on an order', example: '/sr-fulfill-item 60641 9780316580915' },
+      { cmd: '/sr-fulfill-isbn', desc: 'Fulfill all backorders for an ISBN', example: '/sr-fulfill-isbn 9780316580915' },
+      { cmd: '/sr-update-eta', desc: 'Update ETA for an order+ISBN', example: '/sr-update-eta 60166 9780316580915 2025-06-15' },
+      { cmd: '/sr-update-eta', desc: 'Update ETA for all backorders of an ISBN', example: '/sr-update-eta 9780316580915 2025-06-15' },
+      { cmd: '/sr-override', desc: 'Override backorder entry (clear or set)', example: '/sr-override 57294 13059031040133 clear preorder' },
+      { cmd: '/sr-undo', desc: 'Undo a manual fulfillment (use after `/sr-fulfilled-list` to get its number)', example: '/sr-undo 1' },
     ];
     commands.sort((a, b) => a.cmd.localeCompare(b.cmd));
     const lines = commands.map(c => `• \`${c.cmd}\` – ${c.desc} (_Example: \`${c.example}\`_)`).join('\n');
