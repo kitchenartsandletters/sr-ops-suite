@@ -542,14 +542,20 @@ module.exports = function registerSlackCommands(slackApp) {
       // Rebuild the current page to reflect the removal
       const currentPage = parseInt(body.actions[0].block_id || body.actions[0].valuePage, 10) || 1;
       const { blocks, totalPages } = await buildBackordersBlocks(currentPage);
-      const channel = body.channel?.id || body.channel_id;
-      const ts = body.message?.ts || body.container?.message_ts;
-      await client.chat.update({
-        channel,
-        ts,
-        text: `Current Backorders (Page ${currentPage} of ${totalPages})`,
-        blocks
-      });
+      if (body.container?.type === 'view') {
+        // Button clicked in App Home: republish the Home view
+        await publishBackordersHomeView(body.user.id, client);
+      } else {
+        // Button clicked in a chat message: update the message
+        const channel = body.channel.id;
+        const ts = body.message.ts;
+        await client.chat.update({
+          channel,
+          ts,
+          text: `Current Backorders (Page ${currentPage} of ${totalPages})`,
+          blocks
+        });
+      }
     } catch (err) {
       console.error('Error handling Mark Fulfilled:', err);
     }
