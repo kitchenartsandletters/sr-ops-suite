@@ -663,16 +663,59 @@ module.exports = function registerSlackCommands(slackApp) {
     // Build blocks for the requested page and sortKey
     const { blocks, rows } = await buildBackordersBlocks(page, sortKey);
     console.log('Paged backorders rows:', JSON.stringify(rows, null, 2));
-    // Publish the view (blocks already have header/context/divider)
+    // Publish the view (add docs button at top)
     await client.views.publish({
       user_id: userId,
       view: {
         type: 'home',
         private_metadata: JSON.stringify({ page, sortKey }),
-        blocks: blocks ?? []
+        blocks: [
+          // add docs button at top
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'View Docs' },
+                action_id: 'open_docs'
+              }
+            ]
+          },
+          ...(blocks ?? [])
+        ]
       }
     });
   }
+
+  // Handle "View Docs" button click to show README in App Home
+  slackApp.action('open_docs', async ({ ack, body, client }) => {
+    await ack();
+    // Build help blocks (simple indexed list)
+    const helpBlocks = [
+      { type: 'header', text: { type: 'plain_text', text: 'sr-ops-suite Help' } },
+      { type: 'section', text: { type: 'mrkdwn', text:
+        '*Slash Commands (alphabetical):*\n' +
+        '• `/sr-back` – Detailed, paginated backorders\n' +
+        '• `/sr-back-list` – Quick one-line-per-SKU summary\n' +
+        '• `/sr-fulfill-item` – Fulfill a specific ISBN on an order\n' +
+        '• `/sr-fulfill-order` – Fulfill all items on an order\n' +
+        '• `/sr-help` – Show this help modal\n' +
+        '• `/sr-override` – Override backorder for an order line item\n' +
+        '• `/sr-undo` – Undo a manual fulfillment\n' +
+        '• `/sr-update-eta` – Update ETA for a backorder item\n' +
+        '• `/sr-fulfilled-list` – List recently fulfilled items'
+      } }
+    ];
+    // Publish docs view
+    await client.views.publish({
+      user_id: body.user.id,
+      view: {
+        type: 'home',
+        private_metadata: JSON.stringify({ page: 1, sortKey: null }),
+        blocks: helpBlocks
+      }
+    });
+  });
   // Build aggregated blocks: one row per ISBN
   async function buildAggregatedBlocks() {
     const res = await db.query(`
@@ -829,3 +872,32 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 };
+  // Quick help modal via slash command
+  slackApp.command('/sr-help', async ({ ack, body, client }) => {
+    await ack();
+    // Build modal blocks
+    const commands = [
+      { cmd: '/sr-back', desc: 'Detailed, paginated backorders' },
+      { cmd: '/sr-back-list', desc: 'Quick one-line-per-SKU summary' },
+      { cmd: '/sr-fulfill-item', desc: 'Fulfill a specific ISBN on an order' },
+      { cmd: '/sr-fulfill-order', desc: 'Fulfill all items on an order' },
+      { cmd: '/sr-override', desc: 'Override backorder for an order line item' },
+      { cmd: '/sr-undo', desc: 'Undo a manual fulfillment' },
+      { cmd: '/sr-update-eta', desc: 'Update ETA for a backorder item' },
+      { cmd: '/sr-fulfilled-list', desc: 'List recently fulfilled items' }
+    ];
+    commands.sort((a, b) => a.cmd.localeCompare(b.cmd));
+    const lines = commands.map(c => `• \`${c.cmd}\` – ${c.desc}`).join('\n');
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        title: { type: 'plain_text', text: 'sr-ops-suite Help' },
+        close: { type: 'plain_text', text: 'Close' },
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: '*Slash Commands (alphabetical):*' } },
+          { type: 'section', text: { type: 'mrkdwn', text: lines } }
+        ]
+      }
+    });
+  });
