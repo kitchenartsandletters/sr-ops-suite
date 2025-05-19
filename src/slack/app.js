@@ -193,12 +193,6 @@ module.exports = function registerSlackCommands(slackApp) {
             text: { type: 'plain_text', text: 'Sort by Title' },
             action_id: 'backorders_sort_title',
             value: `${page}|title`
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Sort by Qty' },
-            action_id: 'backorders_sort_qty',
-            value: `${page}|qty`
           }
         ]
       },
@@ -386,24 +380,31 @@ module.exports = function registerSlackCommands(slackApp) {
     const [rawPage, rawSort] = body.actions[0].value.split('|');
     const currentPage = parseInt(rawPage, 10);
     const sortKey = rawSort || null;
-    const nextPage = currentPage + 1;
+
     try {
+      // Determine target page
+      let targetPage = currentPage + 1;
+      // Fetch totalPages from a preliminary call
+      const { totalPages } = await buildBackordersBlocks(targetPage, sortKey);
+      if (targetPage > totalPages) {
+        targetPage = totalPages;
+      }
+
       // Home Tab pagination?
       if (body.container?.type === 'view') {
-        await publishBackordersHomeView(body.user.id, client, nextPage, sortKey);
+        await publishBackordersHomeView(body.user.id, client, targetPage, sortKey);
         return;
       }
-      const { blocks, totalPages } = await buildBackordersBlocks(nextPage, sortKey);
-      const page = nextPage > totalPages ? totalPages : nextPage;
-      const { blocks: blocksFinal } = await buildBackordersBlocks(page, sortKey);
-      // Safely get channel and message timestamp
+
+      // Build blocks for the capped page
+      const { blocks } = await buildBackordersBlocks(targetPage, sortKey);
       const channel = body.channel?.id || body.channel_id;
       const ts = body.message?.ts || body.container?.message_ts;
       await client.chat.update({
         channel,
         ts,
-        text: `Current Backorders (Page ${page})`,
-        blocks: blocksFinal
+        text: `Current Backorders (Page ${targetPage} of ${totalPages})`,
+        blocks
       });
     } catch (error) {
       console.error('Error paginating backorders (next):', error);
@@ -417,12 +418,6 @@ module.exports = function registerSlackCommands(slackApp) {
     await publishBackordersHomeView(body.user.id, client, parseInt(page, 10), 'title');
   });
 
-  // Sort by Qty
-  slackApp.action('backorders_sort_qty', async ({ ack, body, client }) => {
-    await ack();
-    const [page] = body.actions[0].value.split('|');
-    await publishBackordersHomeView(body.user.id, client, parseInt(page, 10), 'qty');
-  });
 
   // Override backorder status
   slackApp.command('/sr-override', async ({ ack, body, respond }) => {
