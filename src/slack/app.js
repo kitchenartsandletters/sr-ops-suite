@@ -871,7 +871,6 @@ module.exports = function registerSlackCommands(slackApp) {
       await respond('❌ Failed to fulfill item.');
     }
   });
-};
   // Quick help modal via slash command
   slackApp.command('/sr-help', async ({ ack, body, client }) => {
     await ack();
@@ -901,3 +900,4 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   });
+};
