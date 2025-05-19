@@ -775,8 +775,11 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // The 'back_to_dashboard' handler is no longer used and has been removed.
-  // Build aggregated blocks: one row per ISBN
-  async function buildAggregatedBlocks() {
+  // Build aggregated blocks: one row per ISBN, with sorting
+  async function buildAggregatedBlocks(sortKey = 'qty') {
+    const orderClause = sortKey === 'title'
+      ? 'product_title ASC'
+      : 'SUM(ordered_qty) DESC';
     const res = await db.query(`
       SELECT
         product_barcode   AS barcode,
@@ -791,7 +794,7 @@ module.exports = function registerSlackCommands(slackApp) {
         AND override_flag = FALSE
         AND initial_available < 0
       GROUP BY product_barcode, product_title, product_vendor
-      ORDER BY total_open_qty DESC
+      ORDER BY ${orderClause}
     `);
     const rows = res.rows;
     const count = rows.length;
@@ -914,8 +917,8 @@ module.exports = function registerSlackCommands(slackApp) {
 
 
   // Publish aggregated blocks to the App Home
-  async function publishAggregatedHomeView(userId, client) {
-    const blocks = await buildAggregatedBlocks();
+  async function publishAggregatedHomeView(userId, client, sortKey = 'qty') {
+    const blocks = await buildAggregatedBlocks(sortKey);
     await client.views.publish({
       user_id: userId,
       view: {
@@ -925,6 +928,12 @@ module.exports = function registerSlackCommands(slackApp) {
           {
             type: 'actions',
             elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Sort by Title' },
+                action_id: 'agg_sort_title',
+                value: 'title'
+              },
               {
                 type: 'button',
                 text: { type: 'plain_text', text: 'View Help Docs' },
@@ -950,7 +959,7 @@ module.exports = function registerSlackCommands(slackApp) {
           user: command.user_id,
           text: 'Publishing aggregated backorders summary to your App Home...',
         });
-        // Publish summary
+        // Publish summary (default sortKey)
         await publishAggregatedHomeView(command.user_id, client);
       } catch (err) {
         console.error('Error handling /sr-back-list in background:', err);
@@ -1129,3 +1138,8 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 };
+  // Aggregated Sort by Title
+  slackApp.action('agg_sort_title', async ({ ack, body, client }) => {
+    await ack();
+    await publishAggregatedHomeView(body.user.id, client, 'title');
+  });
