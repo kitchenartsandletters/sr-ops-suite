@@ -198,7 +198,7 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // Backorders report (paginated)
-  slackApp.command('/sr-backorders', async ({ ack, body }) => {
+  slackApp.command('/sr-back', async ({ ack, body }) => {
     await ack();
     // Parse page number and optional sort flag
     const parts = body.text.trim().split(/\s+/);
@@ -210,7 +210,7 @@ module.exports = function registerSlackCommands(slackApp) {
         sortKey = p.split(':')[1];
       }
     }
-    console.log('Using paginated /sr-backorders, page:', page, 'sortKey:', sortKey);
+    console.log('Using paginated /sr-back, page:', page, 'sortKey:', sortKey);
     // Always publish backorders to the user's App Home
     await client.chat.postEphemeral({
       channel: body.channel_id,
