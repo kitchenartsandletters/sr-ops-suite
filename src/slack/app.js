@@ -614,6 +614,7 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
+        text: 'Open backorders summary',
         blocks
       });
     } catch (err) {
@@ -621,7 +622,8 @@ module.exports = function registerSlackCommands(slackApp) {
       await client.chat.postEphemeral({
         channel: body.channel_id,
         user: body.user_id,
-        text: '❌ Failed to list open backorders.'
+        text: '❌ Failed to list open backorders.',
+        blocks: []
       });
     }
   });
