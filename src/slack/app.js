@@ -811,18 +811,6 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*${count} SKUs backordered* • Last refreshed: ${lastRefreshed}` }
         ]
       },
-      { type: 'divider' },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Export CSV' },
-            url: `${process.env.SR_APP_URL}/export/backorders-list.csv`,
-            action_id: 'download_csv'
-          }
-        ]
-      },
       { type: 'divider' }
     ];
     for (const r of rows) {
@@ -846,6 +834,13 @@ module.exports = function registerSlackCommands(slackApp) {
         const actions = [
           {
             type: 'button',
+            text: { type: 'plain_text', text: 'Mark Fulfilled' },
+            style: 'primary',
+            action_id: 'agg_mark_fulfilled',
+            value: r.barcode
+          },
+          {
+            type: 'button',
             text: { type: 'plain_text', text: 'Update ETA' },
             action_id: 'agg_update_eta',
             value: r.barcode
@@ -860,13 +855,6 @@ module.exports = function registerSlackCommands(slackApp) {
             value: r.barcode
           });
         }
-        actions.push({
-          type: 'button',
-          text: { type: 'plain_text', text: 'Mark Fulfilled' },
-          style: 'primary',
-          action_id: 'agg_mark_fulfilled',
-          value: r.barcode
-        });
         blocks.splice(blocks.length, 0, { type: 'actions', elements: actions });
       }
       blocks.push({ type: 'divider' });
@@ -933,6 +921,12 @@ module.exports = function registerSlackCommands(slackApp) {
                 text: { type: 'plain_text', text: 'Sort by Title' },
                 action_id: 'agg_sort_title',
                 value: 'title'
+              },
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Export CSV' },
+                url: `${process.env.SR_APP_URL}/export/backorders-list.csv`,
+                action_id: 'download_csv'
               },
               {
                 type: 'button',
