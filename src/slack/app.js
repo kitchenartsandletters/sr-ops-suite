@@ -835,27 +835,29 @@ module.exports = function registerSlackCommands(slackApp) {
           { type: 'mrkdwn', text: `*ETA:*\n\`${r.eta_date ? new Date(r.eta_date).toLocaleDateString() : '—'}\`` }
         ]
       });
-      // Add aggregated actions block before divider
-      blocks.splice(blocks.length, 0,
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              text: { type: 'plain_text', text: 'Update ETA' },
-              action_id: 'agg_update_eta',
-              value: String(r.barcode || '')
-            },
-            {
-              type: 'button',
-              text: { type: 'plain_text', text: 'Clear ETA' },
-              style: 'danger',
-              action_id: 'agg_clear_eta',
-              value: String(r.barcode || '')
-            }
-          ]
-        }
-      );
+      // Only insert aggregated actions block if r.barcode is truthy
+      if (r.barcode) {
+        blocks.splice(blocks.length, 0,
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Update ETA' },
+                action_id: 'agg_update_eta',
+                value: r.barcode
+              },
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Clear ETA' },
+                style: 'danger',
+                action_id: 'agg_clear_eta',
+                value: r.barcode
+              }
+            ]
+          }
+        );
+      }
       blocks.push({ type: 'divider' });
     }
     return blocks;
