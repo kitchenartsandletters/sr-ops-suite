@@ -564,67 +564,74 @@ module.exports = function registerSlackCommands(slackApp) {
    * Quick list of open backorders, aggregated by ISBN/title.
    * Usage: /sr-back-list
    */
-  slackApp.command('/sr-back-list', async ({ ack, body, client, context }) => {
-    await ack();
-    try {
-      const res = await db.query(`
-        SELECT
-          product_barcode AS isbn,
-          product_title AS title,
-          MIN(order_date)::date AS oldest,
-          MAX(order_date)::date AS newest,
-          SUM(ordered_qty)     AS total_open_qty
-        FROM order_line_backorders
-        WHERE status = 'open'
-          AND override_flag = FALSE
-        GROUP BY product_barcode, product_title
-        ORDER BY total_open_qty DESC
-      `);
-      const rows = res.rows;
-      if (rows.length === 0) {
-        await client.chat.postEphemeral({
-          channel: body.channel_id,
-          user: body.user_id,
-          text: 'No open backorders found.'
-        });
-        return;
-      }
-      // Create a section block per ISBN
-      const blocks = rows.map(r => ({
-        type: 'section',
-        fields: [
-          { type: 'mrkdwn', text: `*ISBN:* ${r.isbn}` },
-          { type: 'mrkdwn', text: `*Title:* ${r.title}` },
-          { type: 'mrkdwn', text: `*Oldest:* ${new Date(r.oldest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Newest:* ${new Date(r.newest).toLocaleDateString()}` },
-          { type: 'mrkdwn', text: `*Open Qty:* ${r.total_open_qty}` }
-        ]
-      }));
-      // Add CSV Download button (requires SR_APP_URL env var)
-      blocks.push({
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Download CSV' },
-            url: `${process.env.SR_APP_URL}/export/backorders-list.csv`
-          }
-        ]
-      });
+  slackApp.command('/sr-back-list', async ({ ack, body, client }) => {
+  await ack();
+  try {
+    // Aggregate by ISBN and title
+    const res = await db.query(`
+      SELECT
+        product_barcode AS isbn,
+        product_title   AS title,
+        MIN(order_date)::date   AS oldest,
+        MAX(order_date)::date   AS newest,
+        SUM(ordered_qty)       AS total_open_qty
+      FROM order_line_backorders
+      WHERE status = 'open'
+        AND override_flag = FALSE
+      GROUP BY product_barcode, product_title
+      ORDER BY total_open_qty DESC
+    `);
+
+    const rows = res.rows;
+    if (rows.length === 0) {
       await client.chat.postEphemeral({
         channel: body.channel_id,
-        user: body.user_id,
-        text: 'Open backorders summary',
-        blocks
+        user:    body.user_id,
+        text:    'No open backorders found.'
       });
-    } catch (err) {
-      console.error('Error listing open backorders:', err);
-      await client.chat.postEphemeral({
-        channel: body.channel_id,
-        user: body.user_id,
-        text: '❌ Failed to list open backorders.',
-        blocks: []
-      });
+      return;
     }
-  });
+
+    // Build the blocks for each ISBN
+    const blocks = rows.map(r => ({
+      type:   'section',
+      fields: [
+        { type: 'mrkdwn', text: `*ISBN:* ${r.isbn}` },
+        { type: 'mrkdwn', text: `*Title:* ${r.title}` },
+        { type: 'mrkdwn', text: `*Oldest:* ${new Date(r.oldest).toLocaleDateString()}` },
+        { type: 'mrkdwn', text: `*Newest:* ${new Date(r.newest).toLocaleDateString()}` },
+        { type: 'mrkdwn', text: `*Open Qty:* ${r.total_open_qty}` }
+      ]
+    }));
+
+    // Add the CSV download button
+    blocks.push({
+      type:     'actions',
+      elements: [
+        {
+          type: 'button',
+          text: { type: 'plain_text', text: 'Download CSV' },
+          url:  `${process.env.SR_APP_URL}/export/backorders-list_${formatEDT()}.csv`
+        }
+      ]
+    });
+
+    // Send ephemeral message with fallback text
+    await client.chat.postEphemeral({
+      channel: body.channel_id,
+      user:    body.user_id,
+      text:    'Open backorders summary',
+      blocks
+    });
+
+  } catch (err) {
+    console.error('Error listing open backorders:', err);
+    await client.chat.postEphemeral({
+      channel: body.channel_id,
+      user:    body.user_id,
+      text:    '❌ Failed to list open backorders.',
+      blocks:  []
+    });
+  }
+});
 };
