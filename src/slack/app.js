@@ -678,7 +678,7 @@ module.exports = function registerSlackCommands(slackApp) {
           {
             type: 'button',
             text: { type: 'plain_text', text: 'Export CSV' },
-            url: `${process.env.SR_APP_URL}/export/backorders-list`,
+            url: `${process.env.SR_APP_URL}/export/backorders-list.csv`,
             action_id: 'download_csv'
           }
         ]
@@ -699,7 +699,6 @@ module.exports = function registerSlackCommands(slackApp) {
       });
       blocks.push({ type: 'divider' });
     }
-    console.log('Aggregated blocks count:', blocks.length);
     return blocks;
   }
 
