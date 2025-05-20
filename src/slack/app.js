@@ -419,30 +419,48 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
 
-  // Override backorder status
+  // Override backorder status (supports both orderId/lineItemId and ISBN forms)
   slackApp.command('/sr-override', async ({ ack, body, respond }) => {
     await ack();
     const parts = body.text.trim().split(/\s+/);
-    const [orderId, lineItemId, action, ...reasonParts] = parts;
-    const overrideFlag = action === 'clear';
-    const overrideReason = reasonParts.join(' ') || null;
     try {
+      // Bulk override by ISBN: /sr-override <isbn> <reason>
+      if (parts.length === 2 && /^\d{13}$/.test(parts[0])) {
+        const [isbn, reason] = parts;
+        const result = await db.query(
+          `UPDATE order_line_backorders
+             SET override_flag   = TRUE,
+                 override_reason = $1,
+                 override_ts     = NOW()
+           WHERE product_barcode = $2
+             AND status           = 'open'
+             AND override_flag    = FALSE`,
+          [reason, isbn]
+        );
+        return await respond(`✅ Bulk override applied to ISBN ${isbn}. Rows affected: ${result.rowCount}${reason ? ` (${reason})` : ''}`);
+      }
+
+      // Single-line override: /sr-override <orderId> <lineItemId> <action> <reason>
+      if (parts.length < 3) {
+        return await respond('Usage: `/sr-override <orderNumber> <lineItemId> <clear|set> [reason]` or `/sr-override <ISBN> <reason>`');
+      }
+      const [orderId, lineItemId, action, ...reasonParts] = parts;
+      const overrideFlag = action === 'clear';
+      const overrideReason = reasonParts.join(' ') || null;
       await db.query(
         `UPDATE order_line_backorders
-           SET override_flag = $1,
+           SET override_flag   = $1,
                override_reason = $2,
-               override_ts = NOW()
-         WHERE order_id = $3
-           AND line_item_id = $4`,
+               override_ts     = NOW()
+         WHERE order_id      = $3
+           AND line_item_id  = $4`,
         [overrideFlag, overrideReason, orderId, lineItemId]
       );
       const verb = overrideFlag ? 'cleared' : 'set';
-      await respond({
-        text: `Override ${verb} for Order ${orderId}, Item ${lineItemId}${overrideReason ? `: ${overrideReason}` : ''}`
-      });
+      return await respond(`✅ Override ${verb} for Order ${orderId}, Item ${lineItemId}${overrideReason ? `: ${overrideReason}` : ''}`);
     } catch (err) {
       console.error('Error overriding backorder:', err);
-      await respond('❌ Unable to apply override.');
+      return await respond('❌ Unable to apply override.');
     }
   });
 
