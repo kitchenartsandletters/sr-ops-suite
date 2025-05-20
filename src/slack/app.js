@@ -245,21 +245,20 @@ module.exports = function registerSlackCommands(slackApp) {
               text: { type: 'plain_text', text: 'Mark Fulfilled' },
               style: 'primary',
               action_id: 'mark_fulfilled',
-              value: `${row.order_id}|${row.line_item_id}`
+              value: `${row.order_id}|${row.line_item_id}|${page}|${sortKey || ''}`
             },
             {
               type: 'button',
               text: { type: 'plain_text', text: 'Update ETA' },
               action_id: 'update_eta',
-              value: `${row.order_id}|${row.line_item_id}`
+              value: `${row.order_id}|${row.line_item_id}|${page}|${sortKey || ''}`
             },
-            // Conditionally include Clear ETA button when an ETA is set
             ...(row.eta_date ? [{
               type: 'button',
               text: { type: 'plain_text', text: 'Clear ETA' },
               style: 'danger',
               action_id: 'clear_eta',
-              value: `${row.order_id}|${row.line_item_id}`
+              value: `${row.order_id}|${row.line_item_id}|${page}|${sortKey || ''}`
             }] : [])
           ]
         },
@@ -571,7 +570,9 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
     await ack();
     try {
-      const [orderId, lineItemId] = body.actions[0].value.split('|');
+      const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
+      const page = parseInt(rawPage, 10) || 1;
+      const sortKey = rawSort || 'age';
       // Update the backorder status to closed
       await db.query(
         `UPDATE order_line_backorders
@@ -584,19 +585,18 @@ module.exports = function registerSlackCommands(slackApp) {
         [orderId, lineItemId]
       );
       // Rebuild the current page to reflect the removal
-      const currentPage = parseInt(body.actions[0].block_id || body.actions[0].valuePage, 10) || 1;
-      const { blocks, totalPages } = await buildBackordersBlocks(currentPage);
       if (body.container?.type === 'view') {
         // Button clicked in App Home: republish the Home view
-        await publishBackordersHomeView(body.user.id, client);
+        await publishBackordersHomeView(body.user.id, client, page, sortKey);
       } else {
         // Button clicked in a chat message: update the message
+        const { blocks, totalPages } = await buildBackordersBlocks(page, sortKey);
         const channel = body.channel.id;
         const ts = body.message.ts;
         await client.chat.update({
           channel,
           ts,
-          text: `Current Backorders (Page ${currentPage} of ${totalPages})`,
+          text: `Current Backorders (Page ${page} of ${totalPages})`,
           blocks
         });
       }
@@ -609,13 +609,15 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('update_eta', async ({ ack, body, client }) => {
     await ack();
     const triggerId = body.trigger_id;
-    const [orderId, lineItemId] = body.actions[0].value.split('|');
+    const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
+    const page = parseInt(rawPage, 10) || 1;
+    const sortKey = rawSort || 'age';
     await client.views.open({
       trigger_id: triggerId,
       view: {
         type: 'modal',
         callback_id: 'update_eta_submit',
-        private_metadata: `${orderId}|${lineItemId}`,
+        private_metadata: `${orderId}|${lineItemId}|${page}|${sortKey}`,
         title: { type: 'plain_text', text: 'Set ETA' },
         submit: { type: 'plain_text', text: 'Save' },
         close: { type: 'plain_text', text: 'Cancel' },
@@ -637,7 +639,9 @@ module.exports = function registerSlackCommands(slackApp) {
   // Handle "Clear ETA" button clicks
   slackApp.action('clear_eta', async ({ ack, body, client }) => {
     await ack();
-    const [orderId, lineItemId] = body.actions[0].value.split('|');
+    const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
+    const page = parseInt(rawPage, 10) || 1;
+    const sortKey = rawSort || 'age';
     try {
       // Clear the eta_date for this row
       await db.query(
@@ -648,7 +652,7 @@ module.exports = function registerSlackCommands(slackApp) {
         [orderId, lineItemId]
       );
       // Refresh Home view for user
-      await publishBackordersHomeView(body.user.id, client);
+      await publishBackordersHomeView(body.user.id, client, page, sortKey);
     } catch (err) {
       console.error('Error clearing ETA date:', err);
     }
@@ -658,7 +662,8 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.view('update_eta_submit', async ({ ack, body, client }) => {
     await ack();
     const metadata = body.view.private_metadata;
-    const [prefix, id] = metadata.split('|');
+    // Parse for new format: orderId|lineItemId|page|sortKey (for per-line), or agg|isbn
+    const [prefix, id, rawPage, rawSort] = metadata.split('|');
     const etaDate =
       (body.view.state.values.eta_input.eta_action.selected_date
         || body.view.state.values.eta_input.eta_action.value); // handle slash vs modal input
@@ -681,14 +686,16 @@ module.exports = function registerSlackCommands(slackApp) {
         });
         await publishAggregatedHomeView(body.user.id, client);
       } else {
-        // existing per-line logic using orderId=id and lineItemId...
-        const [orderId, lineItemId] = metadata.split('|');
+        // per-line logic with page/sortKey preserved
+        const [orderId, lineItemId, rawPage2, rawSort2] = metadata.split('|');
+        const page = parseInt(rawPage2,10);
+        const sortKey = rawSort2 || 'age';
         await db.query(
           `UPDATE order_line_backorders SET eta_date = $1 WHERE order_id = $2 AND line_item_id = $3`,
           [etaDate, orderId, lineItemId]
         );
         // Refresh Home view for user
-        await publishBackordersHomeView(body.user.id, client);
+        await publishBackordersHomeView(body.user.id, client, page, sortKey);
       }
     } catch (err) {
       console.error('Error saving ETA date:', err);
