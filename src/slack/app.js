@@ -566,14 +566,41 @@ module.exports = function registerSlackCommands(slackApp) {
     }
   });
 
-  // Handle "Mark Fulfilled" button clicks
+  // Handle "Mark Fulfilled" button clicks by opening a confirm modal
   slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
     await ack();
+    const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
+    const page = parseInt(rawPage, 10) || 1;
+    const sortKey = rawSort || 'age';
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'confirm_mark_fulfilled',
+        private_metadata: body.actions[0].value,
+        title: { type: 'plain_text', text: 'Confirm Fulfillment' },
+        submit: { type: 'plain_text', text: 'Confirm' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Are you sure you want to mark all backorders for Order *${orderId}*, Item *${lineItemId}* as fulfilled?`
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  // Confirm Mark Fulfilled submit handler
+  slackApp.view('confirm_mark_fulfilled', async ({ ack, body, client }) => {
+    await ack();
+    const [orderId, lineItemId, rawPage, rawSort] = body.view.private_metadata.split('|');
+    const page = parseInt(rawPage, 10) || 1;
+    const sortKey = rawSort || 'age';
     try {
-      const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
-      const page = parseInt(rawPage, 10) || 1;
-      const sortKey = rawSort || 'age';
-      // Update the backorder status to closed
       await db.query(
         `UPDATE order_line_backorders
            SET status = 'closed',
@@ -584,24 +611,10 @@ module.exports = function registerSlackCommands(slackApp) {
            AND line_item_id = $2`,
         [orderId, lineItemId]
       );
-      // Rebuild the current page to reflect the removal
-      if (body.container?.type === 'view') {
-        // Button clicked in App Home: republish the Home view
-        await publishBackordersHomeView(body.user.id, client, page, sortKey);
-      } else {
-        // Button clicked in a chat message: update the message
-        const { blocks, totalPages } = await buildBackordersBlocks(page, sortKey);
-        const channel = body.channel.id;
-        const ts = body.message.ts;
-        await client.chat.update({
-          channel,
-          ts,
-          text: `Current Backorders (Page ${page} of ${totalPages})`,
-          blocks
-        });
-      }
+      // Refresh view
+      await publishBackordersHomeView(body.user.id, client, page, sortKey);
     } catch (err) {
-      console.error('Error handling Mark Fulfilled:', err);
+      console.error('Error confirming Mark Fulfilled:', err);
     }
   });
 
@@ -636,14 +649,39 @@ module.exports = function registerSlackCommands(slackApp) {
     });
   });
 
-  // Handle "Clear ETA" button clicks
+  // Handle "Clear ETA" button clicks by opening confirmation modal
   slackApp.action('clear_eta', async ({ ack, body, client }) => {
     await ack();
     const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'confirm_clear_eta',
+        private_metadata: body.actions[0].value,
+        title: { type: 'plain_text', text: 'Confirm Clear ETA' },
+        submit: { type: 'plain_text', text: 'Confirm' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `Are you sure you want to clear the ETA for Order *${orderId}*, Item *${lineItemId}*?`
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  // Confirm Clear ETA submit handler
+  slackApp.view('confirm_clear_eta', async ({ ack, body, client }) => {
+    await ack();
+    const [orderId, lineItemId, rawPage, rawSort] = body.view.private_metadata.split('|');
     const page = parseInt(rawPage, 10) || 1;
     const sortKey = rawSort || 'age';
     try {
-      // Clear the eta_date for this row
       await db.query(
         `UPDATE order_line_backorders
            SET eta_date = NULL
@@ -651,54 +689,85 @@ module.exports = function registerSlackCommands(slackApp) {
            AND line_item_id = $2`,
         [orderId, lineItemId]
       );
-      // Refresh Home view for user
       await publishBackordersHomeView(body.user.id, client, page, sortKey);
     } catch (err) {
-      console.error('Error clearing ETA date:', err);
+      console.error('Error confirming Clear ETA:', err);
     }
   });
 
-  // Handle ETA modal submission (supports both per-line and aggregated SKU)
+  // Handle ETA modal submission (now only opens confirmation modal)
   slackApp.view('update_eta_submit', async ({ ack, body, client }) => {
     await ack();
     const metadata = body.view.private_metadata;
-    // Parse for new format: orderId|lineItemId|page|sortKey (for per-line), or agg|isbn
     const [prefix, id, rawPage, rawSort] = metadata.split('|');
-    const etaDate =
-      (body.view.state.values.eta_input.eta_action.selected_date
-        || body.view.state.values.eta_input.eta_action.value); // handle slash vs modal input
+    const etaDate = body.view.state.values.eta_input.eta_action.selected_date || body.view.state.values.eta_input.eta_action.value;
+    // Open confirmation modal
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'confirm_update_eta',
+        private_metadata: `${metadata}|${etaDate}`,
+        title: { type: 'plain_text', text: 'Confirm ETA Update' },
+        submit: { type: 'plain_text', text: 'Confirm' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: prefix === 'agg'
+                ? `Are you sure you want to set the ETA for all backorders of ISBN *${id}* to *${etaDate}*?`
+                : `Are you sure you want to set the ETA for Order *${prefix}*, Item *${id}* to *${etaDate}*?`
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  // Confirm Update ETA submit handler
+  slackApp.view('confirm_update_eta', async ({ ack, body, client }) => {
+    await ack();
+    const metadata = body.view.private_metadata;
+    const parts = metadata.split('|');
+    const isAgg = parts[0] === 'agg';
+    let page = 1, sortKey = 'age';
     try {
-      if (prefix === 'agg') {
-        // aggregated SKU
-        await db.query(
+      if (isAgg) {
+        const isbn = parts[1];
+        const etaDate = parts[2];
+        // Perform aggregated update
+        const result = await db.query(
           `UPDATE order_line_backorders
              SET eta_date = $1
            WHERE product_barcode = $2
              AND status = 'open'
              AND override_flag = FALSE`,
-          [etaDate, id]
+          [etaDate, isbn]
         );
-        // confirm and refresh
         await client.chat.postEphemeral({
           channel: body.user.id,
           user: body.user.id,
-          text: `✅ Set ETA (${etaDate}) for ISBN ${id} on all backorders.`
+          text: `✅ Set ETA (${etaDate}) for ISBN ${isbn} on ${result.rowCount} backorders.`
         });
         await publishAggregatedHomeView(body.user.id, client);
       } else {
-        // per-line logic with page/sortKey preserved
-        const [orderId, lineItemId, rawPage2, rawSort2] = metadata.split('|');
-        const page = parseInt(rawPage2,10);
-        const sortKey = rawSort2 || 'age';
+        const [orderId, lineItemId, rawPage, rawSort, etaDate] = parts;
+        page = parseInt(rawPage, 10) || 1;
+        sortKey = rawSort || 'age';
+        // Perform per-line update
         await db.query(
-          `UPDATE order_line_backorders SET eta_date = $1 WHERE order_id = $2 AND line_item_id = $3`,
+          `UPDATE order_line_backorders
+             SET eta_date = $1
+           WHERE order_id = $2
+             AND line_item_id = $3`,
           [etaDate, orderId, lineItemId]
         );
-        // Refresh Home view for user
         await publishBackordersHomeView(body.user.id, client, page, sortKey);
       }
     } catch (err) {
-      console.error('Error saving ETA date:', err);
+      console.error('Error confirming Update ETA:', err);
     }
   });
 
