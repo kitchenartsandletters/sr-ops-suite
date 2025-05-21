@@ -137,8 +137,8 @@ app.post('/slack/events',
   bodyParser.raw({ type: 'application/json', limit: '1mb' }),
   (req, res, next) => next()
 );
-// Mount Bolt receiver
-app.use(slackReceiver.router);
+// Mount Bolt receiver only on the Slack events path
+app.use('/slack/events', slackReceiver.router);
 
 // Now apply JSON/urlencoded for other routes
 app.use(bodyParser.json());
