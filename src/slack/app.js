@@ -231,7 +231,7 @@ module.exports = function registerSlackCommands(slackApp) {
           elements: [
             {
               type: 'button',
-              text: { type: 'plain_text', text: 'Mark Fulfilled' },
+              text: { type: 'plain_text', text: 'Close' },
               style: 'primary',
               action_id: 'mark_fulfilled',
               value: `${row.order_id}|${row.line_item_id}|${page}|${sortKey || ''}`
@@ -556,32 +556,110 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // Handle "Mark Fulfilled" button clicks by opening a confirm modal
-  slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
-    await ack();
-    const [orderId, lineItemId, rawPage, rawSort] = body.actions[0].value.split('|');
-    const page = parseInt(rawPage, 10) || 1;
-    const sortKey = rawSort || 'age';
-    await client.views.open({
-      trigger_id: body.trigger_id,
-      view: {
-        type: 'modal',
-        callback_id: 'confirm_mark_fulfilled',
-        private_metadata: body.actions[0].value,
-        title: { type: 'plain_text', text: 'Confirm Fulfillment' },
-        submit: { type: 'plain_text', text: 'Confirm' },
-        close: { type: 'plain_text', text: 'Cancel' },
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `Are you sure you want to mark all backorders for Order *${orderId}*, Item *${lineItemId}* as fulfilled?`
-            }
+  
+// 1) Open action-choice modal for “Close”
+slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
+  await ack();
+  const [orderId, lineItemId, page, sortKey] = body.actions[0].value.split('|');
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'close_action_choice',
+      private_metadata: body.actions[0].value,
+      title: { type: 'plain_text', text: 'Close Backorder' },
+      submit: { type: 'plain_text', text: 'Save' },
+      close: { type: 'plain_text', text: 'Cancel' },
+      blocks: [
+        {
+          type: 'input',
+          block_id: 'close_action',
+          label: { type: 'plain_text', text: 'Choose action' },
+          element: {
+            type: 'radio_buttons',
+            action_id: 'action_choice',
+            options: [
+              { text: { type: 'plain_text', text: 'Mark Fulfilled' }, value: 'fulfilled' },
+              { text: { type: 'plain_text', text: 'Cancel/Refund' }, value: 'cancel_refund' }
+            ]
           }
-        ]
-      }
-    });
+        }
+      ]
+    }
   });
+});
+
+// 2) Handle action-choice submit and show confirm modal
+slackApp.view('close_action_choice', async ({ ack, body, client }) => {
+  await ack();
+  const metadata = body.view.private_metadata; // e.g., "123|456|1|age"
+  const selected = body.view.state.values.close_action.action_choice.selected_option.value;
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'confirm_close',
+      private_metadata: `${metadata}|${selected}`,
+      title: { type: 'plain_text', text: 'Confirm Close' },
+      submit: { type: 'plain_text', text: 'Confirm' },
+      close: { type: 'plain_text', text: 'Cancel' },
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `Are you sure you want to *${selected === 'fulfilled' ? 'mark this backorder fulfilled' : 'cancel/refund this backorder'}*?`
+          }
+        }
+      ]
+    }
+  });
+});
+
+// 3) Final confirmation: update DB and refresh view
+slackApp.view('confirm_close', async ({ ack, body, client }) => {
+  await ack();
+  const parts = body.view.private_metadata.split('|');
+  // If aggregated flow:
+if (parts[0] === 'agg') {
+  const isbn = parts[1];
+  const action = parts[4];
+  const reasonText = action === 'fulfilled'
+    ? 'Manually marked fulfilled'
+    : 'Manually marked cancel/refund';
+  await db.query(
+    `UPDATE order_line_backorders
+       SET status         = 'closed',
+           override_flag  = TRUE,
+           override_reason = $1,
+           override_ts     = NOW()
+     WHERE product_barcode = $2
+       AND status           = 'open'`,
+    [reasonText, isbn]
+  );
+  await publishAggregatedHomeView(body.user.id, client);
+  return;
+}
+
+  // Detailed flow:
+  const [orderId, lineItemId, rawPage, rawSort, action] = parts;
+  const page = parseInt(rawPage, 10) || 1;
+  const sortKey = rawSort || 'age';
+  const reasonText = action === 'fulfilled'
+    ? 'Manually marked fulfilled'
+    : 'Manually marked cancel/refund';
+  await db.query(
+    `UPDATE order_line_backorders
+       SET status = 'closed',
+           override_flag = TRUE,
+           override_reason = $1,
+           override_ts = NOW()
+     WHERE order_id = $2
+       AND line_item_id = $3`,
+    [reasonText, orderId, lineItemId]
+  );
+  await publishBackordersHomeView(body.user.id, client, page, sortKey);
+});
 
   // Confirm Mark Fulfilled submit handler
   slackApp.view('confirm_mark_fulfilled', async ({ ack, body, client }) => {
@@ -972,7 +1050,7 @@ module.exports = function registerSlackCommands(slackApp) {
         const actions = [
           {
             type: 'button',
-            text: { type: 'plain_text', text: 'Mark Fulfilled' },
+            text: { type: 'plain_text', text: 'Close' },
             style: 'primary',
             action_id: 'agg_mark_fulfilled',
             value: r.barcode
@@ -1257,32 +1335,37 @@ module.exports = function registerSlackCommands(slackApp) {
   });
 
   // Aggregated Mark Fulfilled
-  slackApp.action('agg_mark_fulfilled', async ({ ack, body, client }) => {
-    await ack();
-    const isbn = body.actions[0].value;
-    try {
-      const result = await db.query(
-        `UPDATE order_line_backorders
-           SET status = 'closed',
-               override_flag = TRUE,
-               override_reason = 'Manually marked fulfilled',
-               override_ts = NOW()
-         WHERE product_barcode = $1
-           AND status = 'open'`,
-        [isbn]
-      );
-      // Notify user of row count
-      await client.chat.postEphemeral({
-        channel: body.channel.id,
-        user: body.user.id,
-        text: `✅ Marked all backorders for ISBN ${isbn} fulfilled (${result.rowCount} row(s)).`
-      });
-      // Refresh aggregated summary
-      await publishAggregatedHomeView(body.user.id, client);
-    } catch (err) {
-      console.error('Error in agg_mark_fulfilled:', err);
+// Aggregated “Close” button opens action-choice modal
+slackApp.action('agg_mark_fulfilled', async ({ ack, body, client }) => {
+  await ack();
+  const isbn = body.actions[0].value;
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'close_action_choice',
+      private_metadata: `agg|${isbn}`,
+      title: { type: 'plain_text', text: 'Close Backorder SKU' },
+      submit: { type: 'plain_text', text: 'Save' },
+      close: { type: 'plain_text', text: 'Cancel' },
+      blocks: [
+        {
+          type: 'input',
+          block_id: 'close_action',
+          label: { type: 'plain_text', text: 'Choose action' },
+          element: {
+            type: 'radio_buttons',
+            action_id: 'action_choice',
+            options: [
+              { text: { type: 'plain_text', text: 'Mark Fulfilled' }, value: 'fulfilled' },
+              { text: { type: 'plain_text', text: 'Cancel/Refund' }, value: 'cancel_refund' }
+            ]
+          }
+        }
+      ]
     }
   });
+});
   // Aggregated Sort by Title
   slackApp.action('agg_sort_title', async ({ ack, body, client }) => {
     await ack();
