@@ -34,6 +34,7 @@ module.exports = function registerSlackCommands(slackApp) {
 
   // CSV export endpoint (handles with or without trailing slash)
   slackApp.receiver.app.get(['/export/backorders-list', '/export/backorders-list/'], async (req, res) => {
+    await ack();
     console.log('CSV export endpoint hit:', req.method, req.path);
     try {
       const result = await db.query(`
@@ -92,6 +93,7 @@ module.exports = function registerSlackCommands(slackApp) {
 
   // When a user opens the App Home, publish their dashboard
   slackApp.event('app_home_opened', async ({ event, client }) => {
+    await ack();
     // background view publish
     (async () => {
       try {
