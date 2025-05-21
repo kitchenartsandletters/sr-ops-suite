@@ -131,6 +131,15 @@ app.get('/export/backorders.csv', async (req, res) => {
 // Mount the Shopify orders/create webhook at the correct path
 app.use('/webhooks/orders', ordersWebhookApp);
 
+// Increase payload size limit for Slack events (events & interactive payloads)
+app.post('/slack/events',
+  bodyParser.raw({ type: 'application/json', limit: '1mb' }),
+  (req, res, next) => {
+    // Hand off to Bolt's router which expects a raw body
+    next();
+  }
+);
+
 // Mount Slack Events handler
 app.use(slackReceiver.router);
 
