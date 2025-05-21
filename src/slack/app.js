@@ -92,7 +92,7 @@ module.exports = function registerSlackCommands(slackApp) {
   }
 
   // When a user opens the App Home, publish their dashboard
-  slackApp.event('app_home_opened', async ({ event, client }) => {
+  slackApp.event('app_home_opened', async ({ ack, event, client }) => {
     await ack();
     // background view publish
     (async () => {
