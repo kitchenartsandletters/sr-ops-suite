@@ -1231,11 +1231,10 @@ module.exports = function registerSlackCommands(slackApp) {
           {
             type: 'input',
             block_id: 'eta_input',
-            label: { type: 'plain_text', text: 'ETA date (YYYY-MM-DD)' },
+            label: { type: 'plain_text', text: 'ETA date' },
             element: {
-              type: 'plain_text_input',
-              action_id: 'eta_action',
-              placeholder: { type: 'plain_text', text: 'YYYY-MM-DD' }
+              type: 'datepicker',
+              action_id: 'eta_action'
             }
           }
         ]
