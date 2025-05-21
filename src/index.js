@@ -137,6 +137,11 @@ app.post('/slack/events',
   bodyParser.raw({ type: 'application/json', limit: '1mb' }),
   (req, res, next) => next()
 );
+// Also handle URL-encoded payloads (slash commands, block actions)
+app.post('/slack/events',
+  bodyParser.urlencoded({ type: 'application/x-www-form-urlencoded', limit: '1mb', extended: true }),
+  (req, res, next) => next()
+);
 // Mount Bolt receiver only on the Slack events path
 app.use('/slack/events', slackReceiver.router);
 
