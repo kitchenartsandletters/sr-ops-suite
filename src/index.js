@@ -132,18 +132,15 @@ app.get('/export/backorders.csv', async (req, res) => {
 // Mount the Shopify orders/create webhook at the correct path
 app.use('/webhooks/orders', ordersWebhookApp);
 
-// Raw express route for Slack events, 1mb limit
-app.post('/slack/events',
-  bodyParser.raw({ type: 'application/json', limit: '1mb' }),
-  (req, res, next) => next()
+// Slack Events endpoint with raw-body parsing for JSON and URL-encoded payloads (1mb limit)
+app.post(
+  '/slack/events',
+  bodyParser.raw({
+    type: ['application/json', 'application/x-www-form-urlencoded'],
+    limit: '1mb'
+  }),
+  slackReceiver.router
 );
-// Also handle URL-encoded payloads (slash commands, block actions)
-app.post('/slack/events',
-  bodyParser.urlencoded({ type: 'application/x-www-form-urlencoded', limit: '1mb', extended: true }),
-  (req, res, next) => next()
-);
-// Mount Bolt receiver only on the Slack events path
-app.use('/slack/events', slackReceiver.router);
 
 // Now apply JSON/urlencoded for other routes
 app.use(bodyParser.json());
