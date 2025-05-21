@@ -181,7 +181,7 @@ module.exports = function registerSlackCommands(slackApp) {
       timeStyle: 'short'
     });
     const blocks = [
-      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Dashboard' } },
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - Order View' } },
       { type: 'context', elements: [{ type: 'mrkdwn', text: `*Last refreshed:* ${lastRefreshed}` }] },
       { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})${sortLabel}` } },
@@ -865,7 +865,7 @@ if (parts[0] === 'agg') {
               },
               {
                 type: 'button',
-                text: { type: 'plain_text', text: 'Group by ISBN' },
+                text: { type: 'plain_text', text: 'ISBN View' },
                 action_id: 'home_toggle',
                 value: 'summary'
               },
@@ -916,7 +916,7 @@ if (parts[0] === 'agg') {
       { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: '*What It Does*' } },
       { type: 'section', text: { type: 'mrkdwn', text:
-          '- *Backorders Dashboard* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
+          '- *Backorders - Order View* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
           '- *Display Current Backorders* (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n' +
           '- *Update ETA* (`/sr-update-eta [orderNumber] [isbn] [YYYY-MM-DD]` and `/sr-update-eta [isbn] [YYYY-MM-DD]`): Update the estimated arrival date for a backordered item.\n' +
           '  _Examples:_ `/sr-update-eta 60166 9780316580915 2025-06-01`  `/sr-update-eta 9780316580915 2025-06-01`\n' +
@@ -1020,7 +1020,7 @@ if (parts[0] === 'agg') {
       timeStyle: 'short'
     });
     const blocks = [
-      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders Summary' } },
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - ISBN View' } },
       {
         type: 'context',
         elements: [
@@ -1140,7 +1140,7 @@ if (parts[0] === 'agg') {
               },
               {
                 type: 'button',
-                text: { type: 'plain_text', text: 'Dashboard' },
+                text: { type: 'plain_text', text: 'Order View' },
                 action_id: 'home_toggle',
                 value: 'dashboard'
               },
@@ -1169,7 +1169,7 @@ if (parts[0] === 'agg') {
     });
   }
 
-  // Aggregated backorders summary to App Home
+  // Aggregated backorders ISBN view to App Home
   slackApp.command('/sr-back-list', async ({ ack, command, client }) => {
     await ack();
     // Fire-and-forget background processing
@@ -1179,7 +1179,7 @@ if (parts[0] === 'agg') {
         await client.chat.postEphemeral({
           channel: command.channel_id,
           user: command.user_id,
-          text: 'Publishing aggregated backorders summary to your App Home...',
+          text: 'Publishing aggregated backorders by ISBN to your App Home...',
         });
         // Publish summary (default sortKey)
         await publishAggregatedHomeView(command.user_id, client);
@@ -1253,7 +1253,7 @@ if (parts[0] === 'agg') {
     await ack();
     // Build modal blocks
     const commands = [
-      { cmd: '/sr-back', desc: 'Refresh detailed backorders dashboard', example: '/sr-back' },
+      { cmd: '/sr-back', desc: 'Refresh detailed backorders order view', example: '/sr-back' },
       { cmd: '/sr-back sort:title', desc: 'Sort detailed view by title', example: '/sr-back sort:title' },
       { cmd: '/sr-back-list', desc: 'Refresh quick SKU summary', example: '/sr-back-list' },
       { cmd: '/sr-fulfilled-list', desc: 'List last 10 fulfilled backorders', example: '/sr-fulfilled-list' },
