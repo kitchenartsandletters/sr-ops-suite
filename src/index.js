@@ -33,7 +33,8 @@ const ordersWebhookApp = require('./webhooks/orders');
 // Slack Events API receiver
 const slackReceiver = new ExpressReceiver({
   signingSecret: process.env.SR_SLACK_SIGNING_SECRET,
-  endpoints: '/slack/events'
+  endpoints: '/slack/events',
+  disableBodyParser: true
 });
 
 // Slack Bolt App
@@ -131,19 +132,15 @@ app.get('/export/backorders.csv', async (req, res) => {
 // Mount the Shopify orders/create webhook at the correct path
 app.use('/webhooks/orders', ordersWebhookApp);
 
-// Increase payload size limit for Slack events (events & interactive payloads)
+// Raw express route for Slack events, 1mb limit
 app.post('/slack/events',
   bodyParser.raw({ type: 'application/json', limit: '1mb' }),
-  (req, res, next) => {
-    // Hand off to Bolt's router which expects a raw body
-    next();
-  }
+  (req, res, next) => next()
 );
-
-// Mount Slack Events handler
+// Mount Bolt receiver
 app.use(slackReceiver.router);
 
-// For all other routes (e.g., Slack commands), you can parse JSON bodies
+// Now apply JSON/urlencoded for other routes
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
