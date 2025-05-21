@@ -824,16 +824,18 @@ module.exports = function registerSlackCommands(slackApp) {
   // Refresh current dashboard view
   slackApp.action('home_refresh', async ({ ack, body, client }) => {
     await ack();
-    const { page, sortKey } = JSON.parse(body.view.private_metadata);
-    await publishBackordersHomeView(body.user.id, client, page, sortKey);
-  });
-
-  // Toggle to summary view
-  slackApp.action('home_toggle', async ({ ack, body, client }) => {
-    await ack();
-    const target = body.actions[0].value; // 'summary'
-    if (target === 'summary') {
-      await publishAggregatedHomeView(body.user.id, client);
+    let metadata;
+    try {
+      metadata = JSON.parse(body.view.private_metadata);
+    } catch {
+      metadata = {};
+    }
+    if (metadata.view === 'summary') {
+      await publishAggregatedHomeView(body.user.id, client, metadata.sortKey);
+    } else {
+      const page = metadata.page || 1;
+      const sortKey = metadata.sortKey || 'age';
+      await publishBackordersHomeView(body.user.id, client, page, sortKey);
     }
   });
 
@@ -1058,7 +1060,7 @@ module.exports = function registerSlackCommands(slackApp) {
       user_id: userId,
       view: {
         type: 'home',
-        private_metadata: 'aggregated',
+        private_metadata: JSON.stringify({ view: 'summary' }),
         blocks: [
           {
             type: 'actions',
