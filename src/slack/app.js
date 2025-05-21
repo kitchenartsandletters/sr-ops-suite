@@ -185,17 +185,6 @@ module.exports = function registerSlackCommands(slackApp) {
       { type: 'context', elements: [{ type: 'mrkdwn', text: `*Last refreshed:* ${lastRefreshed}` }] },
       { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: `*Current Backorders* (Page ${page} of ${totalPages})${sortLabel}` } },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Sort by Title' },
-            action_id: 'backorders_sort_title',
-            value: `${page}|title`
-          }
-        ]
-      },
       { type: 'divider' }
     ];
     for (const row of rows) {
