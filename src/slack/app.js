@@ -1305,8 +1305,16 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('home_toggle', async ({ ack, body, client }) => {
     await ack();
     const target = body.actions[0].value;
+    // Safely parse private_metadata JSON (fallback if not JSON)
+    let metadata;
+    try {
+      metadata = JSON.parse(body.view.private_metadata);
+    } catch {
+      metadata = {};
+    }
     if (target === 'dashboard') {
-      const { page, sortKey } = JSON.parse(body.view.private_metadata);
+      const page = metadata.page || 1;
+      const sortKey = metadata.sortKey || 'age';
       await publishBackordersHomeView(body.user.id, client, page, sortKey);
     } else if (target === 'summary') {
       await publishAggregatedHomeView(body.user.id, client);
