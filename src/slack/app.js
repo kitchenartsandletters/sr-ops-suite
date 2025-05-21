@@ -780,17 +780,34 @@ module.exports = function registerSlackCommands(slackApp) {
     // Build blocks for the requested page and sortKey
     const { blocks, rows } = await buildBackordersBlocks(page, sortKey);
     console.log('Paged backorders rows:', JSON.stringify(rows, null, 2));
-    // Publish the view (add docs button at top)
+    // Publish the view (with new top actions)
     await client.views.publish({
       user_id: userId,
       view: {
         type: 'home',
         private_metadata: JSON.stringify({ page, sortKey }),
         blocks: [
-          // add docs button at top
           {
             type: 'actions',
             elements: [
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Refresh' },
+                action_id: 'home_refresh',
+                value: 'dashboard'
+              },
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Group by ISBN' },
+                action_id: 'home_toggle',
+                value: 'summary'
+              },
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Sort by Title' },
+                action_id: 'backorders_sort_title',
+                value: `${page}|title`
+              },
               {
                 type: 'button',
                 text: { type: 'plain_text', text: 'View Help Docs' },
@@ -803,6 +820,22 @@ module.exports = function registerSlackCommands(slackApp) {
       }
     });
   }
+
+  // Refresh current dashboard view
+  slackApp.action('home_refresh', async ({ ack, body, client }) => {
+    await ack();
+    const { page, sortKey } = JSON.parse(body.view.private_metadata);
+    await publishBackordersHomeView(body.user.id, client, page, sortKey);
+  });
+
+  // Toggle to summary view
+  slackApp.action('home_toggle', async ({ ack, body, client }) => {
+    await ack();
+    const target = body.actions[0].value; // 'summary'
+    if (target === 'summary') {
+      await publishAggregatedHomeView(body.user.id, client);
+    }
+  });
 
   // Handle "View Docs" button click to show README in a modal
   slackApp.action('open_docs', async ({ ack, body, client }) => {
@@ -1032,6 +1065,18 @@ module.exports = function registerSlackCommands(slackApp) {
             elements: [
               {
                 type: 'button',
+                text: { type: 'plain_text', text: 'Refresh' },
+                action_id: 'home_refresh',
+                value: 'summary'
+              },
+              {
+                type: 'button',
+                text: { type: 'plain_text', text: 'Dashboard' },
+                action_id: 'home_toggle',
+                value: 'dashboard'
+              },
+              {
+                type: 'button',
                 text: { type: 'plain_text', text: 'Sort by Title' },
                 action_id: 'agg_sort_title',
                 value: 'title'
@@ -1252,5 +1297,17 @@ module.exports = function registerSlackCommands(slackApp) {
   slackApp.action('agg_sort_title', async ({ ack, body, client }) => {
     await ack();
     await publishAggregatedHomeView(body.user.id, client, 'title');
+  });
+
+  // Updated home_toggle handler to switch between dashboard and summary
+  slackApp.action('home_toggle', async ({ ack, body, client }) => {
+    await ack();
+    const target = body.actions[0].value;
+    if (target === 'dashboard') {
+      const { page, sortKey } = JSON.parse(body.view.private_metadata);
+      await publishBackordersHomeView(body.user.id, client, page, sortKey);
+    } else if (target === 'summary') {
+      await publishAggregatedHomeView(body.user.id, client);
+    }
   });
 };
