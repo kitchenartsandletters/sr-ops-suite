@@ -139,8 +139,15 @@ module.exports = function registerSlackCommands(slackApp) {
         orderClause = 'product_vendor ASC';
         break;
       case 'title':
-        // Sort alphabetically by product title
-        orderClause = 'product_title ASC';
+        // Sort by title, ignoring leading articles A, An, The
+        orderClause = `
+          CASE
+            WHEN LOWER(product_title) LIKE 'the %' THEN SUBSTR(product_title, 5)
+            WHEN LOWER(product_title) LIKE 'an %' THEN SUBSTR(product_title, 4)
+            WHEN LOWER(product_title) LIKE 'a %' THEN SUBSTR(product_title, 3)
+            ELSE product_title
+          END ASC
+        `;
         break;
       case 'qty':
         orderClause = 'initial_backordered DESC';
@@ -994,7 +1001,14 @@ if (parts[0] === 'agg') {
   // Build aggregated blocks: one row per ISBN, with sorting
   async function buildAggregatedBlocks(sortKey = 'qty') {
     const orderClause = sortKey === 'title'
-      ? 'product_title ASC'
+      ? `
+        CASE
+          WHEN LOWER(product_title) LIKE 'the %' THEN SUBSTR(product_title, 5)
+          WHEN LOWER(product_title) LIKE 'an %' THEN SUBSTR(product_title, 4)
+          WHEN LOWER(product_title) LIKE 'a %' THEN SUBSTR(product_title, 3)
+          ELSE product_title
+        END ASC
+      `
       : 'SUM(ordered_qty) DESC';
     const res = await db.query(`
       SELECT
