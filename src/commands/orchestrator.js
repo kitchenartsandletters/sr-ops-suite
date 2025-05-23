@@ -1,51 +1,45 @@
-const { getSystemStatus } = require("../lib/utils");
-const { callGPT } = require("../lib/ai");
+const { Pool } = require("pg");
+const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
-module.exports = async ({ command, ack, respond }) => {
-  await ack(); // respond to Slack immediately
+async function getBackorderStatus() {
+  try {
+    const result = await db.query(`
+      SELECT
+        product_barcode,
+        product_title,
+        product_vendor,
+        ordered_qty,
+        initial_backordered,
+        order_date,
+        product_pub_date,
+        eta_date
+      FROM order_line_backorders
+      WHERE status = 'open'
+        AND override_flag = FALSE
+        AND initial_available < 0
+      ORDER BY order_date ASC
+      LIMIT 50
+    `);
 
-  // Defer heavy logic to avoid blocking
-  setTimeout(async () => {
-    try {
-      const status = await getSystemStatus();
+    const formatted = result.rows.map(row => {
+      const daysOpen = Math.floor((Date.now() - new Date(row.order_date).getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        title: row.product_title,
+        isbn: row.product_barcode,
+        vendor: row.product_vendor,
+        qty: row.ordered_qty,
+        backordered: row.initial_backordered,
+        eta: row.eta_date,
+        pub_date: row.product_pub_date,
+        days_open: daysOpen
+      };
+    });
 
-      const gptResponse = await callGPT(`
-You are an operations orchestrator assistant. Analyze the following system status and provide:
-1. A concise summary
-2. 1–2 recommended next actions
-3. Bullet points, under 150 words
+    return { backorders: formatted, timestamp: new Date().toISOString() };
+  } catch (err) {
+    console.error("Error fetching backorder status:", err);
+    return { error: "Could not fetch backorder data." };
+  }
+}
 
-System Status:
-${JSON.stringify(status, null, 2)}
-      `);
-
-      await respond({
-        text: "*🧠 Weekly Orchestrator Summary*",
-        blocks: [
-          {
-            type: "section",
-            text: { type: "mrkdwn", text: `*System Status Summary:*\n${gptResponse}` }
-          },
-          {
-            type: "actions",
-            elements: [
-              {
-                type: "button",
-                text: { type: "plain_text", text: "Retry KIT-84" },
-                action_id: "retry_kit_84"
-              },
-              {
-                type: "button",
-                text: { type: "plain_text", text: "View Logs" },
-                url: "https://github.com/your-org/your-repo/actions"
-              }
-            ]
-          }
-        ]
-      });
-    } catch (err) {
-      console.error("Error in /orchestrator (deferred):", err);
-      await respond({ text: "❌ Failed to retrieve system status or generate summary." });
-    }
-  }, 0); // defer execution
-};
+module.exports = { getBackorderStatus };
