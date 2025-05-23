@@ -1,5 +1,6 @@
 // src/slack/app.js
 require('dotenv').config();
+const { logAgentAction } = require('../utils/logging');
 const { Pool } = require('pg');
 const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
@@ -571,6 +572,17 @@ module.exports = function registerSlackCommands(slackApp) {
 // 1) Open action-choice modal for “Close”
 slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
   await ack();
+  // Log the button click action
+  await logAgentAction({
+    source: 'slack',
+    action_type: 'button_click',
+    action_detail: {
+      action_id: 'mark_fulfilled',
+      value: body.actions?.[0]?.value || null
+    },
+    user_id: body.user?.id || null,
+    result: 'initiated'
+  });
   const [orderId, lineItemId, page, sortKey] = body.actions[0].value.split('|');
   await client.views.open({
     trigger_id: body.trigger_id,

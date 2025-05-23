@@ -42,4 +42,55 @@ async function getBackorderStatus() {
   }
 }
 
-module.exports = { getBackorderStatus };
+
+const { callGPT } = require('../lib/ai');
+const { logAgentAction } = require('../lib/utils');
+
+module.exports = async ({ command, ack, respond }) => {
+  await ack();
+
+  setTimeout(async () => {
+    try {
+      const status = await getBackorderStatus();
+
+      const gptResponse = await callGPT(`
+You are a logistics assistant summarizing open backorders.
+
+Backorder items:
+${JSON.stringify(status.backorders, null, 2)}
+
+Summarize:
+1. Key titles or ISBNs with high open quantities or long aging
+2. Any trends by vendor or missing ETA
+3. Suggestions in plain language, max 150 words
+      `);
+
+      await logAgentAction({
+        source: "gpt",
+        action_type: "suggestion",
+        action_detail: {
+          summary: gptResponse,
+          input_count: status.backorders?.length || 0
+        },
+        user_id: command.user_id,
+        result: "suggested"
+      });
+
+      await respond({
+        text: "*📦 Backorder Summary*",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: gptResponse
+            }
+          }
+        ]
+      });
+    } catch (err) {
+      console.error("Error in /orchestrator flow:", err);
+      await respond({ text: "❌ Could not generate summary." });
+    }
+  }, 0);
+};
