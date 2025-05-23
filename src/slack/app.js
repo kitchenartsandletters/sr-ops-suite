@@ -3,6 +3,7 @@ require('dotenv').config();
 const { Pool } = require('pg');
 const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
+const orchestratorCommand = require('../commands/orchestrator');
 
 
 const PAGE_SIZE = 10;
@@ -338,6 +339,9 @@ module.exports = function registerSlackCommands(slackApp) {
     }
     */
   });
+
+  // Register /orchestrator slash command
+  slackApp.command('/orchestrator', orchestratorCommand);
 
   // Navigate to previous page
   slackApp.action('backorders_prev', async ({ ack, body, client }) => {
