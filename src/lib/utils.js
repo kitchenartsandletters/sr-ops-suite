@@ -1,22 +1,20 @@
-const { createClient } = require("@supabase/supabase-js");
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const { Pool } = require('pg');
+const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
 
 async function getSystemStatus() {
-  const { data: jobs, error } = await supabase
-    .from("jobs_status")
-    .select("*")
-    .order("updated_at", { ascending: false });
+  try {
+    const result = await db.query(
+      'SELECT * FROM jobs_status ORDER BY updated_at DESC'
+    );
 
-  if (error) {
-    console.error("Supabase fetch error:", error);
+    return {
+      jobs: result.rows,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error("Postgres fetch error:", error);
     return { error: "Could not fetch job status" };
   }
-
-  return {
-    jobs,
-    timestamp: new Date().toISOString()
-  };
 }
 
 async function triggerWorkflow(workflowId) {
