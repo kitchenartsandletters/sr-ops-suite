@@ -46,6 +46,11 @@ router.post(
         }
         const { id: line_item_id, variant_id, quantity: ordered_qty } = item;
 
+        if (!variant_id) {
+          console.warn(`Skipping line item ${line_item_id} on order ${order.name} due to missing variant_id`);
+          continue;
+        }
+
         const productTitle = item.title;
         const productSku   = item.sku || item.barcode || null;
 
