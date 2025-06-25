@@ -425,7 +425,7 @@ module.exports = function registerSlackCommands(slackApp) {
     const parts = body.text.trim().split(/\s+/);
     try {
       // Bulk override by ISBN: /sr-override <isbn> <reason>
-      if (parts.length === 2 && /^\d{13}$/.test(parts[0])) {
+      if (parts.length === 2 && (/^\d{13}$/.test(parts[0]) || parts[0] === 'JCA5VOL')) {
         const [isbn, reason] = parts;
         const result = await db.query(
           `UPDATE order_line_backorders
