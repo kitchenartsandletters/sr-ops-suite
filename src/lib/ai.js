@@ -4,6 +4,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+console.log("✅ OPENAI_API_KEY exists?", !!process.env.OPENAI_API_KEY);
+
 async function callGPT(prompt) {
   const response = await openai.chat.completions.create({
     model: "gpt-4",
