@@ -1,8 +1,10 @@
 // src/slack/app.js
 require('dotenv').config();
+const { logAgentAction } = require('../utils/logging');
 const { Pool } = require('pg');
 const { WebClient } = require('@slack/web-api');
 const db = new Pool({ connectionString: process.env.SR_DATABASE_URL });
+const orchestratorCommand = require('../commands/orchestrator');
 
 
 const PAGE_SIZE = 10;
@@ -141,8 +143,15 @@ module.exports = function registerSlackCommands(slackApp) {
         orderClause = 'product_vendor ASC';
         break;
       case 'title':
-        // Sort alphabetically by product title
-        orderClause = 'product_title ASC';
+        // Sort by title, ignoring leading articles A, An, The
+        orderClause = `
+          CASE
+            WHEN LOWER(product_title) LIKE 'the %' THEN SUBSTR(product_title, 5)
+            WHEN LOWER(product_title) LIKE 'an %' THEN SUBSTR(product_title, 4)
+            WHEN LOWER(product_title) LIKE 'a %' THEN SUBSTR(product_title, 3)
+            ELSE product_title
+          END ASC
+        `;
         break;
       case 'qty':
         orderClause = 'initial_backordered DESC';
@@ -183,6 +192,7 @@ module.exports = function registerSlackCommands(slackApp) {
       timeStyle: 'short'
     });
     const blocks = [
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - Order View' } },
       { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - Order View' } },
       { type: 'context', elements: [{ type: 'mrkdwn', text: `*Last refreshed:* ${lastRefreshed}` }] },
       { type: 'divider' },
@@ -334,6 +344,9 @@ module.exports = function registerSlackCommands(slackApp) {
     */
   });
 
+  // Register /orchestrator slash command
+  slackApp.command('/orchestrator', orchestratorCommand);
+
   // Navigate to previous page
   slackApp.action('backorders_prev', async ({ ack, body, client }) => {
     await ack();
@@ -415,7 +428,7 @@ module.exports = function registerSlackCommands(slackApp) {
     const parts = body.text.trim().split(/\s+/);
     try {
       // Bulk override by ISBN: /sr-override <isbn> <reason>
-      if (parts.length === 2 && /^\d{13}$/.test(parts[0])) {
+      if (parts.length === 2 && (/^\d{13}$/.test(parts[0]) || parts[0] === 'JCA5VOL')) {
         const [isbn, reason] = parts;
         const result = await db.query(
           `UPDATE order_line_backorders
@@ -562,6 +575,17 @@ module.exports = function registerSlackCommands(slackApp) {
 // 1) Open action-choice modal for “Close”
 slackApp.action('mark_fulfilled', async ({ ack, body, client }) => {
   await ack();
+  // Log the button click action
+  await logAgentAction({
+    source: 'slack',
+    action_type: 'button_click',
+    action_detail: {
+      action_id: 'mark_fulfilled',
+      value: body.actions?.[0]?.value || null
+    },
+    user_id: body.user?.id || null,
+    result: 'initiated'
+  });
   const [orderId, lineItemId, page, sortKey] = body.actions[0].value.split('|');
   await client.views.open({
     trigger_id: body.trigger_id,
@@ -868,6 +892,7 @@ if (parts[0] === 'agg') {
               {
                 type: 'button',
                 text: { type: 'plain_text', text: 'ISBN View' },
+                text: { type: 'plain_text', text: 'ISBN View' },
                 action_id: 'home_toggle',
                 value: 'summary'
               },
@@ -890,7 +915,7 @@ if (parts[0] === 'agg') {
     });
   }
 
-  // Refresh current dashboard view
+  // Refresh current orders view
   slackApp.action('home_refresh', async ({ ack, body, client }) => {
     await ack();
     let metadata;
@@ -918,6 +943,7 @@ if (parts[0] === 'agg') {
       { type: 'divider' },
       { type: 'section', text: { type: 'mrkdwn', text: '*What It Does*' } },
       { type: 'section', text: { type: 'mrkdwn', text:
+          '- *Backorders - Order View* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
           '- *Backorders - Order View* (`#sr-backorders` channel): A dedicated Slack channel for team-wide backorder discussions and notifications.\n' +
           '- *Display Current Backorders* (`/sr-back`): Display and refresh a detailed, paginated view of current backorders by line item.\n' +
           '- *Update ETA* (`/sr-update-eta [orderNumber] [isbn] [YYYY-MM-DD]` and `/sr-update-eta [isbn] [YYYY-MM-DD]`): Update the estimated arrival date for a backordered item.\n' +
@@ -996,7 +1022,14 @@ if (parts[0] === 'agg') {
   // Build aggregated blocks: one row per ISBN, with sorting
   async function buildAggregatedBlocks(sortKey = 'qty') {
     const orderClause = sortKey === 'title'
-      ? 'product_title ASC'
+      ? `
+        CASE
+          WHEN LOWER(product_title) LIKE 'the %' THEN SUBSTR(product_title, 5)
+          WHEN LOWER(product_title) LIKE 'an %' THEN SUBSTR(product_title, 4)
+          WHEN LOWER(product_title) LIKE 'a %' THEN SUBSTR(product_title, 3)
+          ELSE product_title
+        END ASC
+      `
       : 'SUM(ordered_qty) DESC';
     const res = await db.query(`
       SELECT
@@ -1022,6 +1055,7 @@ if (parts[0] === 'agg') {
       timeStyle: 'short'
     });
     const blocks = [
+      { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - ISBN View' } },
       { type: 'header', text: { type: 'plain_text', text: '📦 Backorders - ISBN View' } },
       {
         type: 'context',
