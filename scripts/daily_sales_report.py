@@ -201,12 +201,14 @@ def fetch_24h_orders(client: ShopifyClient, start_et: datetime, end_et: datetime
 
 
 def aggregate_products(orders):
-    signed_bp_sales = {}
     main_sales = {}
     preorder_sales = {}
+    backorder_sales = {}
+    oos_sales = {}
 
     for order in orders:
         li_edges = order["lineItems"]["edges"]
+
         for edge in li_edges:
             item = edge["node"]
             variant = item.get("variant")
@@ -214,27 +216,29 @@ def aggregate_products(orders):
                 continue
 
             attrs = {a["key"]: a["value"] for a in item.get("customAttributes", [])}
-            is_signed = attrs.get("_signed") == "true"
-            is_bookplate = attrs.get("_bookplate") == "true"
 
             product = variant["product"]
             pid = product["id"]
             title = product["title"]
 
-            is_preorder = any(c["node"]["title"] == "Preorder" for c in product["collections"]["edges"])
+            # Preorder = belongs to Preorder collection
+            is_preorder = any(
+                c["node"]["title"] == "Preorder"
+                for c in product["collections"]["edges"]
+            )
 
-            # Blacklist by Product ID or Title prefix
+            # Blacklist
             if pid in BLACKLISTED_PRODUCT_IDS or title.startswith("Cookbook Club:"):
                 continue
 
-            attr_label = ", ".join([
-                lbl for lbl in (
-                    "Signed" if is_signed else None,
-                    "Bookplate" if is_bookplate else None
-                ) if lbl
-            ])
+            # Attributes rolled into single column
+            label_parts = []
+            if attrs.get("_signed") == "true":
+                label_parts.append("Signed")
+            if attrs.get("_bookplate") == "true":
+                label_parts.append("Bookplate")
+            attr_label = ", ".join(label_parts)
 
-            title = product["title"]
             sku = variant.get("sku")
             barcode = variant.get("barcode")
             total_inv = product.get("totalInventory")
@@ -244,14 +248,32 @@ def aggregate_products(orders):
                 for c in product["collections"]["edges"]
             ]
 
-            # Determine target bucket
+            # Determine order channel classification
+            source = order.get("sourceName", "")
+            handle = (order.get("channel") or {}).get("handle", "")
+
+            is_online = (source == "web") or (handle == "online_store")
+            # treat everything else as POS
+            quantity_target = ("ol_sold" if is_online else "pos_sold")
+
+            # ─────────────────────────────────────────
+            #  BUCKET SELECTION LOGIC
+            # ─────────────────────────────────────────
             if is_preorder:
                 target = preorder_sales
-            elif is_signed or is_bookplate:
-                target = signed_bp_sales
             else:
-                target = main_sales
+                if total_inv is not None:
+                    if total_inv < 0:
+                        target = backorder_sales
+                    elif total_inv == 0:
+                        target = oos_sales
+                    else:
+                        target = main_sales
+                else:
+                    # failsafe: treat missing inventory as main bucket
+                    target = main_sales
 
+            # Create/extend bucket entry
             bucket = target.setdefault(pid, {
                 "title": title,
                 "author": sku or "",
@@ -263,23 +285,23 @@ def aggregate_products(orders):
                 "attributes": attr_label,
             })
 
-            # Robust OL/POS classification using both sourceName and channel.handle
-            source = order.get("sourceName", "")
-            handle = (order.get("channel") or {}).get("handle", "")
+            bucket[quantity_target] += item["quantity"]
 
-            is_online = (source == "web") or (handle == "online_store")
-            is_pos = (source == "pos") or (handle == "pos")
+    return main_sales, backorder_sales, oos_sales, preorder_sales
 
-            if is_online:
-                bucket["ol_sold"] += item["quantity"]
-            else:
-                bucket["pos_sold"] += item["quantity"]
-
-    return main_sales, preorder_sales, signed_bp_sales
-
+def sort_title_key(title: str) -> str:
+    import unicodedata
+    # Normalize unicode (NFKD)
+    normalized = unicodedata.normalize("NFKD", title)
+    lowered = normalized.lower()
+    # Strip leading articles
+    for article in ("the ", "a ", "an "):
+        if lowered.startswith(article):
+            return lowered[len(article):]
+    return lowered
 
 def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
-    main_sales, preorder_sales, signed_bp_sales = data
+    main_sales, backorder_sales, oos_sales, preorder_sales = data
     filename = f"daily_sales_report_{report_datetime_et.strftime('%Y%m%d_%H%M')}.csv"
 
     if dry_run:
@@ -292,7 +314,7 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
         writer.writerow(["Report Date", report_datetime_et.strftime("%Y-%m-%d %H:%M %Z")])
         writer.writerow([])
 
-        writer.writerow([
+        header = [
             "Product",
             "Author",
             "Collection",
@@ -302,9 +324,11 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
             "POS Sales",
             "Attributes",
             "Notes"
-        ])
+        ]
 
-        for pid, info in main_sales.items():
+        # MAIN SALES
+        writer.writerow(header)
+        for pid, info in sorted(main_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
             writer.writerow([
                 info["title"],
                 info["author"],
@@ -313,16 +337,55 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
                 info["available"],
                 info["ol_sold"],
                 info["pos_sold"],
-                info.get("attributes", ""),
+                info["attributes"],
                 ""
             ])
 
+        # BACKORDERS
+        if backorder_sales:
+            writer.writerow([])
+            writer.writerow(["BACKORDERS"])
+            writer.writerow([])
+            writer.writerow(header)
+            for pid, info in sorted(backorder_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
+                writer.writerow([
+                    info["title"],
+                    info["author"],
+                    ", ".join(info["collections"]),
+                    info["isbn"],
+                    info["available"],
+                    info["ol_sold"],
+                    info["pos_sold"],
+                    info["attributes"],
+                    ""
+                ])
+
+        # OUT OF STOCK
+        if oos_sales:
+            writer.writerow([])
+            writer.writerow(["OUT OF STOCK"])
+            writer.writerow([])
+            writer.writerow(header)
+            for pid, info in sorted(oos_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
+                writer.writerow([
+                    info["title"],
+                    info["author"],
+                    ", ".join(info["collections"]),
+                    info["isbn"],
+                    info["available"],
+                    info["ol_sold"],
+                    info["pos_sold"],
+                    info["attributes"],
+                    ""
+                ])
+
+        # PREORDER
         if preorder_sales:
             writer.writerow([])
             writer.writerow(["PREORDER SALES"])
             writer.writerow([])
-
-            for pid, info in preorder_sales.items():
+            writer.writerow(header)
+            for pid, info in sorted(preorder_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
                 writer.writerow([
                     info["title"],
                     info["author"],
@@ -331,25 +394,7 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
                     info["available"],
                     info["ol_sold"],
                     info["pos_sold"],
-                    info.get("attributes", ""),
-                    ""
-                ])
-
-        if signed_bp_sales:
-            writer.writerow([])
-            writer.writerow(["SIGNED & BOOKPLATE SALES"])
-            writer.writerow([])
-
-            for pid, info in signed_bp_sales.items():
-                writer.writerow([
-                    info["title"],
-                    info["author"],
-                    ", ".join(info["collections"]),
-                    info["isbn"],
-                    info["available"],
-                    info["ol_sold"],
-                    info["pos_sold"],
-                    info.get("attributes", ""),
+                    info["attributes"],
                     ""
                 ])
 
@@ -375,10 +420,8 @@ def main():
     now_et = today_et
 
     orders = fetch_24h_orders(client, start_et, end_et)
-    main_sales, preorder_sales, signed_bp_sales = aggregate_products(orders)
-    write_csv((main_sales, preorder_sales, signed_bp_sales), now_et, args.dry_run)
-
-    logging.info(f"Using Mailtrap token prefix: {os.getenv('MAILTRAP_API_TOKEN')[:6]}...")
+    main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(orders)
+    write_csv((main_sales, backorder_sales, oos_sales, preorder_sales), now_et, args.dry_run)
 
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
