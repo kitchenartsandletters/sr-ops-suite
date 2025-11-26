@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import base64
 import requests
 from pathlib import Path
+from daily_sales_pdf import generate_daily_sales_pdf
 
 from dotenv import load_dotenv
 
@@ -423,6 +424,17 @@ def main():
     main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(orders)
     write_csv((main_sales, backorder_sales, oos_sales, preorder_sales), now_et, args.dry_run)
 
+    # === PDF GENERATION ===
+    pdf_filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.pdf"
+    pdf_path = os.path.join(os.getcwd(), pdf_filename)
+    generate_daily_sales_pdf(
+        main_sales=main_sales,
+        backorder_sales=backorder_sales,
+        oos_sales=oos_sales,
+        preorder_sales=preorder_sales,
+        output_path=pdf_path
+    )
+
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
         filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.csv"
@@ -434,7 +446,7 @@ def main():
             f"<p><strong>{filename}</strong></p>"
         )
 
-        attachments = prepare_mailtrap_attachments([filepath])
+        attachments = prepare_mailtrap_attachments([filepath, pdf_path])
         send_mailtrap_email(subject, html_body, attachments)
 
 
