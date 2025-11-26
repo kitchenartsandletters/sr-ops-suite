@@ -378,6 +378,8 @@ def main():
     main_sales, preorder_sales, signed_bp_sales = aggregate_products(orders)
     write_csv((main_sales, preorder_sales, signed_bp_sales), now_et, args.dry_run)
 
+    logging.info(f"Using Mailtrap token prefix: {os.getenv('MAILTRAP_API_TOKEN')[:6]}...")
+
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
         filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.csv"
