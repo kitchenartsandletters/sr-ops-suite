@@ -81,25 +81,7 @@ def build_section(title, rows, story, styles):
     story.append(Spacer(1, 0.3 * inch))
 
 
-def generate_daily_sales_pdf(sections, output_path):
-    """
-    sections = {
-        "main": [...],
-        "backorders": [...],
-        "out_of_stock": [...],
-        "preorders": [...],
-    }
-
-    Each row is a dict:
-    {
-        "title": "...",
-        "author": "...",
-        "qty": int,
-        "pos": int,
-        "on_hand": int,
-        "attributes": [...],
-    }
-    """
+def generate_daily_sales_pdf(main_sales, backorder_sales, oos_sales, preorder_sales, output_path):
     doc = SimpleDocTemplate(
         output_path,
         pagesize=letter,
@@ -112,9 +94,9 @@ def generate_daily_sales_pdf(sections, output_path):
     styles = getSampleStyleSheet()
     story = []
 
-    build_section("Main Sales", sections.get("main", []), story, styles)
-    build_section("Backorders", sections.get("backorders", []), story, styles)
-    build_section("Out of Stock", sections.get("out_of_stock", []), story, styles)
-    build_section("Preorders", sections.get("preorders", []), story, styles)
+    build_section("Main Sales", main_sales, story, styles)
+    build_section("Backorders", backorder_sales, story, styles)
+    build_section("Out of Stock", oos_sales, story, styles)
+    build_section("Preorders", preorder_sales, story, styles)
 
     doc.build(story)
