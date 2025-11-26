@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import base64
 import requests
 from pathlib import Path
-from daily_sales_pdf import generate_daily_sales_pdf
+from scripts.daily_sales_pdf import generate_daily_sales_pdf
 
 from dotenv import load_dotenv
 
