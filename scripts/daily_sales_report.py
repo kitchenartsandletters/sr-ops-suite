@@ -428,10 +428,10 @@ def main():
     pdf_filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.pdf"
     pdf_path = os.path.join(os.getcwd(), pdf_filename)
     generate_daily_sales_pdf(
-        main_sales=main_sales,
-        backorder_sales=backorder_sales,
-        oos_sales=oos_sales,
-        preorder_sales=preorder_sales,
+        main_sales=list(main_sales.values()),
+        backorder_sales=list(backorder_sales.values()),
+        oos_sales=list(oos_sales.values()),
+        preorder_sales=list(preorder_sales.values()),
         output_path=pdf_path
     )
 
