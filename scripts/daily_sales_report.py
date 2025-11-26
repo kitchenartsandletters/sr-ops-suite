@@ -21,6 +21,9 @@ import logging
 import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import base64
+import requests
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -37,6 +40,65 @@ BLACKLISTED_PRODUCT_IDS = {
     "gid://shopify/Product/6589468967045",
 }
 
+""" MAILTRAP EMAIL DELIVERY """
+
+def validate_env_for_mailtrap():
+    required = ["MAILTRAP_API_KEY", "EMAIL_SENDER", "EMAIL_RECIPIENTS"]
+    missing = [var for var in required if not os.getenv(var)]
+    if missing:
+        raise EnvironmentError(f"Missing Mailtrap environment variables: {', '.join(missing)}")
+
+def prepare_mailtrap_attachments(filepaths):
+    attachments = []
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            logging.warning(f"Attachment missing: {fp}")
+            continue
+        with open(fp, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+        attachments.append({
+            "filename": os.path.basename(fp),
+            "content": encoded,
+            "type": "text/csv",
+            "disposition": "attachment",
+        })
+    return attachments
+
+def send_mailtrap_email(subject, html_body, attachments=None):
+    validate_env_for_mailtrap()
+    url = "https://send.api.mailtrap.io/api/send"
+    token = os.getenv("MAILTRAP_API_KEY")
+    sender = os.getenv("EMAIL_SENDER")
+    recipient_list = os.getenv("EMAIL_RECIPIENTS", "")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    to_addresses = [
+        {"email": r.strip()}
+        for r in recipient_list.split(",")
+        if r.strip()
+    ]
+
+    payload = {
+        "from": {"email": sender, "name": "Daily Sales Report"},
+        "to": to_addresses,
+        "subject": subject,
+        "html": html_body
+    }
+
+    if attachments:
+        payload["attachments"] = attachments
+
+    response = requests.post(url, headers=headers, json=payload)
+
+    if response.status_code != 200:
+        logging.error(f"Mailtrap error {response.status_code}: {response.text}")
+        raise RuntimeError("Mailtrap email failed.")
+    else:
+        logging.info("📧 Daily sales report email sent successfully.")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate Daily Sales Report (24h rolling window).")
@@ -315,6 +377,20 @@ def main():
     orders = fetch_24h_orders(client, start_et, end_et)
     main_sales, preorder_sales, signed_bp_sales = aggregate_products(orders)
     write_csv((main_sales, preorder_sales, signed_bp_sales), now_et, args.dry_run)
+
+    # === MAILTRAP EMAIL DELIVERY ===
+    if not args.dry_run:
+        filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.csv"
+        filepath = os.path.join(os.getcwd(), filename)
+
+        subject = f"📊 Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
+        html_body = (
+            "<p>Your daily sales report is attached.</p>"
+            f"<p><strong>{filename}</strong></p>"
+        )
+
+        attachments = prepare_mailtrap_attachments([filepath])
+        send_mailtrap_email(subject, html_body, attachments)
 
 
 if __name__ == "__main__":
