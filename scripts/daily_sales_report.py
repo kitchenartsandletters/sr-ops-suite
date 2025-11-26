@@ -43,7 +43,7 @@ BLACKLISTED_PRODUCT_IDS = {
 """ MAILTRAP EMAIL DELIVERY """
 
 def validate_env_for_mailtrap():
-    required = ["MAILTRAP_API_KEY", "EMAIL_SENDER", "EMAIL_RECIPIENTS"]
+    required = ["MAILTRAP_API_TOKEN", "EMAIL_SENDER", "EMAIL_RECIPIENTS"]
     missing = [var for var in required if not os.getenv(var)]
     if missing:
         raise EnvironmentError(f"Missing Mailtrap environment variables: {', '.join(missing)}")
@@ -67,7 +67,7 @@ def prepare_mailtrap_attachments(filepaths):
 def send_mailtrap_email(subject, html_body, attachments=None):
     validate_env_for_mailtrap()
     url = "https://send.api.mailtrap.io/api/send"
-    token = os.getenv("MAILTRAP_API_KEY")
+    token = os.getenv("MAILTRAP_API_TOKEN")
     sender = os.getenv("EMAIL_SENDER")
     recipient_list = os.getenv("EMAIL_RECIPIENTS", "")
 
