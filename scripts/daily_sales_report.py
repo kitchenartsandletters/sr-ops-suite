@@ -441,15 +441,26 @@ def main():
     # === PDF GENERATION ===
     pdf_filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf"
     pdf_path = os.path.join(os.getcwd(), pdf_filename)
-    generate_daily_sales_pdf(
-    {
+
+    sections = {
         "main":        list(main_sales.values()),
         "backorders":  list(backorder_sales.values()),
         "out_of_stock": list(oos_sales.values()),
         "preorders":   list(preorder_sales.values()),
-    },
-    pdf_path,
-)
+    }
+
+    report_title = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
+    window_text = (
+        f"{start_et.strftime('%b %d %Y %I:%M %p ET')} → "
+        f"{end_et.strftime('%b %d %Y %I:%M %p ET')}"
+    )
+
+    generate_daily_sales_pdf(
+        sections,
+        pdf_path,
+        report_title,
+        window_text,
+    )
 
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
