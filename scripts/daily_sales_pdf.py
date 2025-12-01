@@ -48,6 +48,8 @@ def make_table(data, col_widths):
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
                 ("BACKGROUND", (0, 1), (-1, -1), colors.white),
                 ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D9D9DB")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
             ]
         )
     )
@@ -75,12 +77,21 @@ def build_section(title, rows, story, styles):
     story.append(generate_section_header(title, styles))
     story.append(Spacer(1, 0.15 * inch))
 
-    headers = ["Title", "Author", "On Hand", "OL", "POS",  "Attributes"]
-    data = [headers]
+    headers = ["Title", "Author", "OL", "POS", "On Hand", "Attributes"]
+    data = [
+        [
+            Paragraph(headers[0], styles["BodyText"]),
+            Paragraph(headers[1], styles["BodyText"]),
+            Paragraph(headers[2], styles["BodyText"]),
+            headers[3],
+            headers[4],
+            headers[5],
+        ]
+    ]
 
     for r in sort_rows(rows):
-        title_val = normalize_unicode(r.get("title", ""))
-        author_val = normalize_unicode(r.get("author", ""))
+        title_val = Paragraph(normalize_unicode(r.get("title", "")), styles["BodyText"])
+        author_val = Paragraph(normalize_unicode(r.get("author", "")), styles["BodyText"])
 
         ol = r.get("ol_sold", 0) or 0
         pos = r.get("pos_sold", 0) or 0
@@ -91,15 +102,15 @@ def build_section(title, rows, story, styles):
             [
                 title_val,
                 author_val,
-                str(ol),
+                Paragraph(str(ol), styles["BodyText"]),
                 str(pos),
                 str(on_hand),
                 normalize_unicode(attrs),
             ]
         )
 
-    # Widths tuned for letter page
-    col_widths = [2.8 * inch, 1.8 * inch, 0.6 * inch, 0.6 * inch, 0.8 * inch, 1.8 * inch]
+    # Widths tuned for letter page, slightly narrower for wrapping
+    col_widths = [2.5 * inch, 1.6 * inch, 0.5 * inch, 0.6 * inch, 0.8 * inch, 1.8 * inch]
 
     story.append(make_table(data, col_widths))
     story.append(Spacer(1, 0.3 * inch))
@@ -121,8 +132,8 @@ def generate_daily_sales_pdf(sections, output_path):
     doc = SimpleDocTemplate(
         output_path,
         pagesize=letter,
-        leftMargin=0.55 * inch,
-        rightMargin=0.55 * inch,
+        leftMargin=0.8 * inch,
+        rightMargin=0.8 * inch,
         topMargin=0.75 * inch,
         bottomMargin=0.75 * inch,
     )
