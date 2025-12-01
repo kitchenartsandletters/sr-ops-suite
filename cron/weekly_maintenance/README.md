@@ -1,6 +1,6 @@
 # Daily Sales Report Cron Worker
 
-This Railway Worker executes the `daily_sales_report.py` script on a schedule.
+This Railway Worker executes the `weekly_maintenance_report.py` script on a schedule.
 
 ## Deployment
 
@@ -18,4 +18,4 @@ This Railway Worker executes the `daily_sales_report.py` script on a schedule.
    Example: `0 6 * * *` (6am UTC)
 
 ## Logs
-View real-time logs in Railway → daily-sales-worker → Logs.
+View real-time logs in Railway → weekly-maintenance-worker → Logs.
