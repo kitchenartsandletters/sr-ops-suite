@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 
 from lop_unfulfilled_report import ShopifyClient
 from business_calendar import get_reporting_window
+from business_calendar import is_business_day
 
 
 # Hardcoded blacklist of product IDs
@@ -301,9 +302,8 @@ def sort_title_key(title: str) -> str:
             return lowered[len(article):]
     return lowered
 
-def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
+def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, dry_run: bool):
     main_sales, backorder_sales, oos_sales, preorder_sales = data
-    filename = f"daily_sales_report_{report_datetime_et.strftime('%Y%m%d_%H%M')}.csv"
 
     if dry_run:
         logging.info("Dry run: would write %s", filename)
@@ -312,7 +312,8 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
 
-        writer.writerow(["Report Date", report_datetime_et.strftime("%Y-%m-%d %H:%M %Z")])
+        writer.writerow(["Report Date", datetime.now(start_et.tzinfo).strftime("%Y-%m-%d %H:%M %Z")])
+        writer.writerow([f"Window: {start_et.strftime('%b %d %Y %I:%M %p ET')} → {end_et.strftime('%b %d %Y %I:%M %p ET')}"])
         writer.writerow([])
 
         header = [
@@ -320,7 +321,7 @@ def write_csv(data: tuple, report_datetime_et: datetime, dry_run: bool):
             "Author",
             "Collection",
             "ISBN",
-            "Available",
+            "On Hand",
             "OL Sales",
             "POS Sales",
             "Attributes",
@@ -413,31 +414,45 @@ def main():
     tz_et = ZoneInfo("America/New_York")
     today_et = datetime.now(tz_et)
 
-    start_date, end_date = get_reporting_window(today_et.date())
+    # Skip report on non-business days
+    if not is_business_day(today_et.date()):
+        logging.info(f"Today ({today_et.date()}) is not a business day — skipping report.")
+        return
 
-    start_et = datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=tz_et)
-    end_et = datetime(end_date.year, end_date.month, end_date.day, 23, 59, 59, tzinfo=tz_et)
+    start_date, _ = get_reporting_window(today_et.date())
+    end_date = today_et.date()
+
+    start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
+    end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59, tzinfo=tz_et)
+
+    logging.info(f"Reporting window start ET: {start_et}")
+    logging.info(f"Reporting window end ET: {end_et}")
 
     now_et = today_et
 
     orders = fetch_24h_orders(client, start_et, end_et)
     main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(orders)
-    write_csv((main_sales, backorder_sales, oos_sales, preorder_sales), now_et, args.dry_run)
+    filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
+    if not args.dry_run:
+        write_csv((main_sales, backorder_sales, oos_sales, preorder_sales), filename, start_et, end_et, args.dry_run)
+    else:
+        logging.info("Dry run: would write %s", filename)
 
     # === PDF GENERATION ===
-    pdf_filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.pdf"
+    pdf_filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf"
     pdf_path = os.path.join(os.getcwd(), pdf_filename)
     generate_daily_sales_pdf(
-        main_sales=list(main_sales.values()),
-        backorder_sales=list(backorder_sales.values()),
-        oos_sales=list(oos_sales.values()),
-        preorder_sales=list(preorder_sales.values()),
-        output_path=pdf_path
-    )
+    {
+        "main":        list(main_sales.values()),
+        "backorders":  list(backorder_sales.values()),
+        "out_of_stock": list(oos_sales.values()),
+        "preorders":   list(preorder_sales.values()),
+    },
+    pdf_path,
+)
 
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
-        filename = f"daily_sales_report_{now_et.strftime('%Y%m%d_%H%M')}.csv"
         filepath = os.path.join(os.getcwd(), filename)
 
         subject = f"📊 Daily Sales Report — {now_et.strftime('%B %d, %Y')}"

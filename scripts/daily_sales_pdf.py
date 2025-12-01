@@ -55,33 +55,69 @@ def make_table(data, col_widths):
 
 
 def build_section(title, rows, story, styles):
+    """
+    rows is a list of dicts coming from daily_sales_report.py buckets, e.g.:
+
+    {
+        "title": str,
+        "author": str,
+        "collections": [...],
+        "isbn": str,
+        "available": int | None,
+        "ol_sold": int,
+        "pos_sold": int,
+        "attributes": str,
+    }
+    """
     if not rows:
         return
+
     story.append(generate_section_header(title, styles))
     story.append(Spacer(1, 0.15 * inch))
 
-    headers = ["Title", "Author", "Qty", "POS", "OnHand", "Attributes"]
+    headers = ["Title", "Author", "On Hand", "OL", "POS",  "Attributes"]
     data = [headers]
 
     for r in sort_rows(rows):
+        title_val = normalize_unicode(r.get("title", ""))
+        author_val = normalize_unicode(r.get("author", ""))
+
+        ol = r.get("ol_sold", 0) or 0
+        pos = r.get("pos_sold", 0) or 0
+        on_hand = r.get("available", "")
+        attrs = r.get("attributes", "")
+
         data.append(
             [
-                normalize_unicode(r.get("title", "")),
-                normalize_unicode(r.get("author", "")),
-                str(r.get("qty", "")),
-                str(r.get("pos", "")),
-                str(r.get("on_hand", "")),
-                ", ".join(r.get("attributes", [])),
+                title_val,
+                author_val,
+                str(ol),
+                str(pos),
+                str(on_hand),
+                normalize_unicode(attrs),
             ]
         )
 
-    col_widths = [2.4 * inch, 1.6 * inch, 0.6 * inch, 0.6 * inch, 0.7 * inch, 1.8 * inch]
+    # Widths tuned for letter page
+    col_widths = [2.8 * inch, 1.8 * inch, 0.6 * inch, 0.6 * inch, 0.8 * inch, 1.8 * inch]
 
     story.append(make_table(data, col_widths))
     story.append(Spacer(1, 0.3 * inch))
 
 
-def generate_daily_sales_pdf(main_sales, backorder_sales, oos_sales, preorder_sales, output_path):
+def generate_daily_sales_pdf(sections, output_path):
+    """
+    sections is a dict:
+
+        {
+            "main":        [bucket_dict, ...],
+            "backorders":  [bucket_dict, ...],
+            "out_of_stock":[bucket_dict, ...],
+            "preorders":   [bucket_dict, ...],
+        }
+
+    Each bucket_dict has the shape documented in build_section().
+    """
     doc = SimpleDocTemplate(
         output_path,
         pagesize=letter,
@@ -94,9 +130,14 @@ def generate_daily_sales_pdf(main_sales, backorder_sales, oos_sales, preorder_sa
     styles = getSampleStyleSheet()
     story = []
 
-    build_section("Main Sales", main_sales, story, styles)
-    build_section("Backorders", backorder_sales, story, styles)
-    build_section("Out of Stock", oos_sales, story, styles)
-    build_section("Preorders", preorder_sales, story, styles)
+    section_specs = [
+        ("Main Sales", sections.get("main", [])),
+        ("Backorders", sections.get("backorders", [])),
+        ("Out of Stock", sections.get("out_of_stock", [])),
+        ("Preorders", sections.get("preorders", [])),
+    ]
+
+    for title, rows in section_specs:
+        build_section(title, rows, story, styles)
 
     doc.build(story)

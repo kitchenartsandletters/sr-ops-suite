@@ -1,21 +1,25 @@
 """
 Business Calendar Utilities for sr-ops-suite
 
-This module defines the business-day calendar for Kitchen Arts & Letters and
-produces reporting windows for automated daily cron jobs.
+This module defines the business-day calendar for Kitchen Arts & Letters.
 
-Core rule:
-    Every report must include:
-      - The last open business day before today, AND
-      - All closed calendar days since that day up to yesterday.
+IMPORTANT:
+- This module returns ONLY date boundaries (no times).
+- Time-of-day logic (10:00 AM start → 9:59:59 AM end) is applied in daily_sales_report.py.
+- A *reporting window* always begins on the last open business day before today and ends yesterday.
+- If the store was closed for multiple consecutive days, those closed days are included in the window.
 
-Examples:
-    Fri after July 4 closure → covers Jul 3 + Jul 4
-    Mon after weekend → covers Sat + Sun
-    Mon after two-day storm closure → covers Fri + Sat + Sun
+Examples of reporting windows (date boundaries only):
+    • Fri after July 4 closure → covers Jul 3–Jul 4
+    • Mon after weekend → covers Sat–Sun
+    • Mon after two-day storm closure → covers Fri–Sun
+
+This file intentionally handles only calendar-day logic.
+daily_sales_report.py handles the 10:00 AM → 9:59:59 AM ET timestamp expansion.
 """
 
 from datetime import date, timedelta
+import logging
 
 # ----------------------------
 # 1. Static Calendar Data
@@ -55,14 +59,20 @@ def is_business_day(d: date) -> bool:
 
     # Holiday closures override everything
     if d in HOLIDAY_CLOSURES_2025:
-        return False
+        result = False
+        logging.debug(f"is_business_day({d}) -> {result}")
+        return result
 
     # Special open Sundays
     if d.weekday() == 6:  # Sunday
-        return d in SPECIAL_OPEN_SUNDAYS_2025
+        result = d in SPECIAL_OPEN_SUNDAYS_2025
+        logging.debug(f"is_business_day({d}) -> {result}")
+        return result
 
     # Normal business days: Mon (0) → Sat (5)
-    return d.weekday() in (0, 1, 2, 3, 4, 5)
+    result = d.weekday() in (0, 1, 2, 3, 4, 5)
+    logging.debug(f"is_business_day({d}) -> {result}")
+    return result
 
 
 def find_last_open_day(today: date) -> date:
@@ -71,10 +81,13 @@ def find_last_open_day(today: date) -> date:
     an open business day.
     """
     cursor = today - timedelta(days=1)
+    logging.debug(f"find_last_open_day start: today={today}, cursor={cursor}")
 
     while not is_business_day(cursor):
+        logging.debug(f"{cursor} is closed, stepping back")
         cursor -= timedelta(days=1)
 
+    logging.debug(f"find_last_open_day resolved last open: {cursor}")
     return cursor
 
 
@@ -92,6 +105,7 @@ def get_reporting_window(today: date):
     If yesterday is closed:
         include all closed days up to last open day.
     """
+    logging.debug(f"get_reporting_window called for today={today}")
     yesterday = today - timedelta(days=1)
 
     # Find last open business day before 'today'
@@ -103,4 +117,5 @@ def get_reporting_window(today: date):
     # …and always ends yesterday (closed or not).
     end_date = yesterday
 
+    logging.debug(f"Reporting window raw: {start_date} -> {end_date}")
     return start_date, end_date
