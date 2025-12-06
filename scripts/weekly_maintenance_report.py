@@ -14,6 +14,8 @@ Output:
   - weekly_oos_unfulfilled_not_preorder_YYYYMMDD.csv
 
 Runs independently of the business calendar logic; intended for a weekly cron at 10:00 AM ET on Fridays.
+
+Note: "unfulfilled orders" for this report are derived from InventoryLevel committed quantities (the same numbers used by Shopify Admin), not fulfillment orders.
 """
 
 # Hardcoded blacklist rules (titles, IDs, SKUs, etc.)
@@ -102,10 +104,10 @@ def send_mailtrap_email(subject, html_body, attachments=None):
 # GraphQL Queries
 # -----------------------------
 
-# Fetch ALL products (we’ll filter client-side for inventory, collections, etc.)
+# Fetch ALL products (filtered via GraphQL argument, lighter pages)
 PRODUCTS_QUERY = """
-query WeeklyProducts($first: Int!, $after: String) {
-  products(first: $first, after: $after) {
+query WeeklyProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query) {
     edges {
       cursor
       node {
@@ -115,58 +117,33 @@ query WeeklyProducts($first: Int!, $after: String) {
         status
         onlineStoreUrl
         productType
-        variants(first: 50) {
+        variants(first: 20) {
           edges {
             node {
-              id
               sku
               barcode
-            }
-          }
-        }
-        collections(first: 50) {
-          edges {
-            node {
-              id
-              title
-            }
-          }
-        }
-      }
-    }
-    pageInfo {
-      hasNextPage
-    }
-  }
-}
-"""
-
-# All unfulfilled orders (no date filter; weekly maintenance about current risk)
-UNFULFILLED_ORDERS_QUERY = """
-query WeeklyUnfulfilledOrders($first: Int!, $after: String) {
-  orders(
-    first: $first
-    after: $after
-    query: "fulfillment_status:unfulfilled financial_status:paid -financial_status:refunded"
-    sortKey: PROCESSED_AT
-    reverse: false
-  ) {
-    edges {
-      cursor
-      node {
-        id
-        name
-        lineItems(first: 100) {
-          edges {
-            node {
-              quantity
-              variant {
-                id
-                product {
-                  id
-                  title
+              inventoryItem {
+                inventoryLevels(first: 10) {
+                  edges {
+                    node {
+                      location {
+                        name
+                      }
+                      quantities(names: ["committed"]) {
+                        name
+                        quantity
+                      }
+                    }
+                  }
                 }
               }
+            }
+          }
+        }
+        collections(first: 10) {
+          edges {
+            node {
+              title
             }
           }
         }
@@ -185,73 +162,90 @@ query WeeklyUnfulfilledOrders($first: Int!, $after: String) {
 # -----------------------------
 
 def fetch_all_products(client: ShopifyClient):
+    """Fetch all ACTIVE products via GraphQL in reasonably sized pages.
+
+    Notes:
+      - Uses first=100 to keep per-query cost manageable.
+      - Filters to status:active to avoid archived catalog noise.
+      - Catches RuntimeError from ShopifyClient.graphql to avoid hard crashes
+        if Shopify returns a transient 500; partial results are still returned
+        and logged.
+    """
     products = {}
     after = None
 
     page = 1
     while True:
         logging.info(f"[weekly] Fetching products page {page}...")
-        variables = {"first": 100, "after": after}
-        data = client.graphql(PRODUCTS_QUERY, variables)
-        if not data:
+        variables = {
+            "first": 100,
+            "after": after,
+            "query": "status:active",
+        }
+        try:
+            data = client.graphql(PRODUCTS_QUERY, variables)
+        except RuntimeError as e:
+            logging.error("[weekly] Shopify GraphQL error on products page %d: %s", page, e)
+            # Return what we have so far instead of crashing the whole script
             break
 
-        edges = data["products"]["edges"]
+        if not data or "products" not in data:
+            logging.warning("[weekly] No product data returned on page %d", page)
+            break
+
+        edges = data["products"].get("edges", [])
         for edge in edges:
-            node = edge["node"]
-            pid = node["id"]
+            node = edge.get("node") or {}
+            pid = node.get("id")
+            if not pid:
+                continue
             products[pid] = node
 
-        if not data["products"]["pageInfo"]["hasNextPage"]:
+        page_info = data["products"].get("pageInfo", {})
+        if not page_info.get("hasNextPage"):
             break
-        after = edges[-1]["cursor"]
+
+        if edges:
+            after = edges[-1]["cursor"]
+        else:
+            logging.warning("[weekly] No edges on page %d despite hasNextPage=true; stopping.", page)
+            break
+
         page += 1
 
-    logging.info("[weekly] Loaded %d products", len(products))
+    logging.info("[weekly] Loaded %d products (status:active)", len(products))
     return products
 
 
-def fetch_unfulfilled_orders(client: ShopifyClient):
-    orders = []
-    after = None
 
-    page = 1
-    while True:
-        logging.info(f"[weekly] Fetching unfulfilled orders page {page}...")
-        variables = {"first": 50, "after": after}
-        data = client.graphql(UNFULFILLED_ORDERS_QUERY, variables)
-        if not data:
-            break
-
-        edges = data["orders"]["edges"]
-        for edge in edges:
-            orders.append(edge["node"])
-
-        if not data["orders"]["pageInfo"]["hasNextPage"]:
-            break
-        after = edges[-1]["cursor"]
-        page += 1
-
-    logging.info("[weekly] Loaded %d unfulfilled orders", len(orders))
-    return orders
-
-
-def build_product_to_unfulfilled_qty(orders):
+# New committed-qty mapping helper
+def build_product_to_committed_qty(products):
     """
-    Returns dict: { product_id: total_unfulfilled_qty }
+    Returns dict: { product_id: total_committed_qty } using InventoryLevels.
+
+    We sum 'committed' quantities across all variants and locations for each product.
+    This becomes our unified definition of "unfulfilled" customer obligations.
     """
     mapping = {}
-    for order in orders:
-        for edge in order["lineItems"]["edges"]:
-            item = edge["node"]
-            variant = item.get("variant")
-            if not variant:
-                continue
-            product = variant.get("product")
-            if not product:
-                continue
-            pid = product["id"]
-            mapping[pid] = mapping.get(pid, 0) + item["quantity"]
+    for pid, p in products.items():
+        total_committed = 0
+        variants_conn = (p.get("variants") or {}).get("edges", [])  # variants(first: 20)
+        for v_edge in variants_conn:
+            v_node = v_edge.get("node") or {}
+            inv_item = (v_node.get("inventoryItem") or {})
+            levels_conn = (inv_item.get("inventoryLevels") or {}).get("edges", [])
+            for lvl_edge in levels_conn:
+                lvl_node = lvl_edge.get("node") or {}
+                quantities = lvl_node.get("quantities") or []
+                for q in quantities:
+                    # We requested names=["committed"], but be defensive.
+                    if (q.get("name") or "").lower() == "committed":
+                        qty = q.get("quantity") or 0
+                        if isinstance(qty, (int, float)):
+                            total_committed += qty
+        if total_committed > 0:
+            mapping[pid] = total_committed
+    logging.info("[weekly] Built committed-qty map for %d products", len(mapping))
     return mapping
 
 
@@ -386,6 +380,12 @@ def report_oos_unfulfilled_not_preorder(products, prod_to_unfulfilled_qty):
         if total_inv <= 0 and not in_preorder_collection(p):
             v = product_primary_variant(p)
             collections = product_collections_titles(p)
+            if total_inv < 0:
+                status = "backorder"
+            elif total_inv == 0 and unfulfilled_qty > 0:
+                status = "pending_fulfillment"
+            else:
+                status = ""
             rows.append({
                 "product_id": pid,
                 "title": p.get("title", ""),
@@ -394,6 +394,7 @@ def report_oos_unfulfilled_not_preorder(products, prod_to_unfulfilled_qty):
                 "inventory": total_inv,
                 "collections": ", ".join(collections) if collections else "",
                 "unfulfilled_qty": unfulfilled_qty,
+                "backorder_status": status,
             })
 
     logging.info("[weekly] Report 3: %d rows (<=0 inventory, unfulfilled, not preorder)", len(rows))
@@ -412,6 +413,7 @@ CSV_HEADER = [
     "Inventory",
     "Unfulfilled Qty",
     "Collections",
+    "Status"
 ]
 
 
@@ -430,6 +432,7 @@ def write_csv(filename, rows):
                 r.get("inventory", ""),
                 r.get("unfulfilled_qty", ""),
                 r.get("collections", ""),
+                r.get("backorder_status", ""),
             ])
     logging.info("[weekly] CSV written: %s", filename)
 
@@ -455,8 +458,7 @@ def main():
 
     # 1. Load core data
     products = fetch_all_products(client)
-    unfulfilled_orders = fetch_unfulfilled_orders(client)
-    prod_to_unfulfilled_qty = build_product_to_unfulfilled_qty(unfulfilled_orders)
+    prod_to_unfulfilled_qty = build_product_to_committed_qty(products)
 
     # 2. Build reports
     logging.info("📦 Building Report 1: Negative inventory, no unfulfilled orders...")

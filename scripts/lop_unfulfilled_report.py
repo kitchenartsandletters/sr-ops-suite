@@ -68,7 +68,7 @@ class ShopifyClient:
 
     def graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = {"query": query, "variables": variables or {}}
-        resp = self.session.post(self.base_url, json=payload, timeout=30)
+        resp = self.session.post(self.base_url, json=payload, timeout=(10, 120))
         try:
             data = resp.json()
         except ValueError:
