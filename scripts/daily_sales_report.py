@@ -123,7 +123,6 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
         id
         name
         processedAt
-        displayFinancialStatus
         sourceName
         channel {
           handle
@@ -133,6 +132,10 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
             node {
               quantity
               title
+              customAttributes {
+                key
+                value
+              }
               variant {
                 id
                 sku
@@ -141,18 +144,7 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
                   id
                   title
                   totalInventory
-                  collections(first: 20) {
-                    edges {
-                      node {
-                        title
-                      }
-                    }
-                  }
                 }
-              }
-              customAttributes {
-                key
-                value
               }
             }
           }
@@ -166,13 +158,61 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
 }
 """
 
+PRODUCT_DETAILS_QUERY = """
+query ProductDetails($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    totalInventory
+    priceRangeV2 {
+      minVariantPrice {
+        amount
+        currencyCode
+      }
+    }
+    collections(first: 5) {
+      edges {
+        node {
+          title
+        }
+      }
+    }
+    variants(first: 50) {
+      edges {
+        node {
+          id
+          inventoryItem {
+            id
+            inventoryLevels(first: 5) {
+              edges {
+                node {
+                  quantities(names: ["incoming"]) {
+                    name
+                    quantity
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 def fetch_24h_orders(client: ShopifyClient, start_et: datetime, end_et: datetime):
+    # Build strict Z‑normalized ISO timestamps for Shopify query
+    start_str = start_et.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+    end_str = end_et.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+
+    # Shopify query filter (quoted timestamps are mandatory for reliable boundaries)
     q_filter = (
-        f"financial_status:paid "
-        f"-financial_status:refunded "
-        f"processed_at:>={start_et.isoformat()} "
-        f"processed_at:<={end_et.isoformat()}"
+        f'financial_status:paid '
+        f'-financial_status:refunded '
+        f'processed_at:>="{start_str}" '
+        f'processed_at:<="{end_str}"'
     )
 
     records = []
@@ -190,19 +230,125 @@ def fetch_24h_orders(client: ShopifyClient, start_et: datetime, end_et: datetime
             break
 
         edges = data["orders"]["edges"]
+
+        # Post‑filter all returned orders for true strict‑window compliance
         for edge in edges:
-            records.append(edge["node"])
+            node = edge["node"]
+            p_at = node.get("processedAt")
+            if not p_at:
+                continue
+
+            try:
+                dt = datetime.fromisoformat(p_at.replace("Z", "+00:00"))
+            except Exception:
+                logging.warning(f"Could not parse processedAt timestamp: {p_at}")
+                continue
+
+            # Convert to ET for comparison against strict window
+            dt_et = dt.astimezone(start_et.tzinfo)
+
+            if start_et <= dt_et <= end_et:
+                records.append(node)
+            else:
+                logging.warning(
+                    f"⚠️ Drift detected: Shopify returned order {node.get('name')} "
+                    f"processedAt={dt_et} outside strict window "
+                    f"{start_et} → {end_et}"
+                )
 
         if not data["orders"]["pageInfo"]["hasNextPage"]:
             break
 
         after = edges[-1]["cursor"]
 
-    logging.info("Fetched %d orders in last 24h window.", len(records))
+    logging.info("Fetched %d strictly-windowed orders.", len(records))
     return records
 
+def extract_product_ids(orders) -> set[str]:
+    """
+    Walk the order payload and collect all unique product IDs
+    referenced by line item variants.
+    """
+    product_ids: set[str] = set()
+    for order in orders:
+        for edge in order.get("lineItems", {}).get("edges", []):
+            item = edge.get("node") or {}
+            variant = item.get("variant")
+            if not variant:
+                continue
+            product = variant.get("product") or {}
+            pid = product.get("id")
+            if pid:
+                product_ids.add(pid)
+    return product_ids
 
-def aggregate_products(orders):
+
+def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
+    """
+    For each product ID, fetch:
+      - collections
+      - totalInventory
+      - summed incoming inventory across all variants
+
+    Returns:
+      {
+        product_id: {
+          "title": str,
+          "available": int | None,
+          "collections": [str],
+          "incoming": int,
+        },
+        ...
+      }
+    """
+    details: dict[str, dict] = {}
+
+    for pid in sorted(product_ids):
+        variables = {"id": pid}
+        data = client.graphql(PRODUCT_DETAILS_QUERY, variables)
+        product = (data or {}).get("product")
+        if not product:
+            continue
+
+        title = product.get("title") or ""
+        total_inv = product.get("totalInventory")
+        collections = [
+            edge["node"]["title"]
+            for edge in product.get("collections", {}).get("edges", [])
+        ]
+
+        # Extract product price (min variant price amount as string)
+        price = None
+        pr = product.get("priceRangeV2") or {}
+        minp = pr.get("minVariantPrice") or {}
+        amount = minp.get("amount")
+        if amount is not None:
+            price = amount
+
+        incoming_total = 0
+        for v_edge in product.get("variants", {}).get("edges", []):
+            v_node = v_edge.get("node") or {}
+            inv_item = v_node.get("inventoryItem") or {}
+            for lvl_edge in inv_item.get("inventoryLevels", {}).get("edges", []):
+                lvl_node = lvl_edge.get("node") or {}
+                for q in lvl_node.get("quantities") or []:
+                    if q.get("name") == "incoming":
+                        qty_val = q.get("quantity") or 0
+                        incoming_total += qty_val
+
+        details[pid] = {
+            "title": title,
+            "available": total_inv,
+            "collections": collections,
+            "incoming": incoming_total,
+            "price": price,
+        }
+
+    logging.info("Enriched %d products with collections + incoming inventory.", len(details))
+    return details
+
+
+def aggregate_products(orders, product_details: dict):
     main_sales = {}
     preorder_sales = {}
     backorder_sales = {}
@@ -221,13 +367,18 @@ def aggregate_products(orders):
 
             product = variant["product"]
             pid = product["id"]
-            title = product["title"]
+            base_title = product["title"]
 
-            # Preorder = belongs to Preorder collection
-            is_preorder = any(
-                c["node"]["title"] == "Preorder"
-                for c in product["collections"]["edges"]
-            )
+            # Enriched details (preferred source of truth)
+            pdetail = product_details.get(pid, {})
+            title = pdetail.get("title", base_title)
+            collections = pdetail.get("collections", [])
+            available = pdetail.get("available", product.get("totalInventory"))
+            incoming = pdetail.get("incoming", 0)
+            price = pdetail.get("price")
+
+            # Preorder = belongs to Preorder collection (from enrichment)
+            is_preorder = "Preorder" in collections
 
             # Blacklist
             if pid in BLACKLISTED_PRODUCT_IDS or title.startswith("Cookbook Club:"):
@@ -243,12 +394,6 @@ def aggregate_products(orders):
 
             sku = variant.get("sku")
             barcode = variant.get("barcode")
-            total_inv = product.get("totalInventory")
-
-            collections = [
-                c["node"]["title"]
-                for c in product["collections"]["edges"]
-            ]
 
             # Determine order channel classification
             source = order.get("sourceName", "")
@@ -259,15 +404,15 @@ def aggregate_products(orders):
             quantity_target = ("ol_sold" if is_online else "pos_sold")
 
             # ─────────────────────────────────────────
-            #  BUCKET SELECTION LOGIC
+            #  BUCKET SELECTION LOGIC (using 'available')
             # ─────────────────────────────────────────
             if is_preorder:
                 target = preorder_sales
             else:
-                if total_inv is not None:
-                    if total_inv < 0:
+                if available is not None:
+                    if available < 0:
                         target = backorder_sales
-                    elif total_inv == 0:
+                    elif available == 0:
                         target = oos_sales
                     else:
                         target = main_sales
@@ -276,18 +421,33 @@ def aggregate_products(orders):
                     target = main_sales
 
             # Create/extend bucket entry
-            bucket = target.setdefault(pid, {
-                "title": title,
-                "author": sku or "",
-                "collections": collections,
-                "isbn": barcode or "NO BARCODE",
-                "available": total_inv,
-                "ol_sold": 0,
-                "pos_sold": 0,
-                "attributes": attr_label,
-            })
+            if pid not in target:
+                target[pid] = {
+                    "title": title,
+                    "author": sku or "",
+                    "collections": collections,
+                    "isbn": barcode or "NO BARCODE",
+                    "available": available,
+                    "incoming": incoming,
+                    "price": price,
+                    "ol_sold": 0,
+                    "pos_sold": 0,
+                    "attributes": attr_label,
+                }
+            else:
+                # Keep inventory/enrichment in sync if something changed mid-run
+                bucket = target[pid]
+                bucket["available"] = available
+                bucket["incoming"] = incoming
+                bucket["collections"] = collections
+                bucket["title"] = title
+                bucket["price"] = price
+                if sku:
+                    bucket["author"] = sku
+                if barcode:
+                    bucket["isbn"] = barcode
 
-            bucket[quantity_target] += item["quantity"]
+            target[pid][quantity_target] += item["quantity"]
 
     return main_sales, backorder_sales, oos_sales, preorder_sales
 
@@ -319,13 +479,13 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
         header = [
             "Product",
             "Author",
-            "Collection",
             "ISBN",
+            "Price",
+            "Collection",
             "On Hand",
-            "OL Sales",
-            "POS Sales",
+            "Incoming Inv",
             "Attributes",
-            "Notes"
+            "Notes",
         ]
 
         # MAIN SALES
@@ -334,13 +494,13 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
             writer.writerow([
                 info["title"],
                 info["author"],
-                ", ".join(info["collections"]),
                 info["isbn"],
+                info.get("price", ""),
+                ", ".join(info["collections"]),
                 info["available"],
-                info["ol_sold"],
-                info["pos_sold"],
+                info.get("incoming", 0),
                 info["attributes"],
-                ""
+                "",
             ])
 
         # BACKORDERS
@@ -353,13 +513,13 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
-                    ", ".join(info["collections"]),
                     info["isbn"],
+                    info.get("price", ""),
+                    ", ".join(info["collections"]),
                     info["available"],
-                    info["ol_sold"],
-                    info["pos_sold"],
+                    info.get("incoming", 0),
                     info["attributes"],
-                    ""
+                    "",
                 ])
 
         # OUT OF STOCK
@@ -372,13 +532,13 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
-                    ", ".join(info["collections"]),
                     info["isbn"],
+                    info.get("price", ""),
+                    ", ".join(info["collections"]),
                     info["available"],
-                    info["ol_sold"],
-                    info["pos_sold"],
+                    info.get("incoming", 0),
                     info["attributes"],
-                    ""
+                    "",
                 ])
 
         # PREORDER
@@ -391,13 +551,13 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
-                    ", ".join(info["collections"]),
                     info["isbn"],
+                    info.get("price", ""),
+                    ", ".join(info["collections"]),
                     info["available"],
-                    info["ol_sold"],
-                    info["pos_sold"],
+                    info.get("incoming", 0),
                     info["attributes"],
-                    ""
+                    "",
                 ])
 
     logging.info("CSV written: %s", filename)
@@ -431,7 +591,15 @@ def main():
     now_et = today_et
 
     orders = fetch_24h_orders(client, start_et, end_et)
-    main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(orders)
+
+    # Enrich products (collections + incoming inventory) using InventoryLevel.quantities
+    product_ids = extract_product_ids(orders)
+    product_details = fetch_product_details(client, product_ids)
+
+    main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(
+        orders,
+        product_details,
+    )
     filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
     if not args.dry_run:
         write_csv((main_sales, backorder_sales, oos_sales, preorder_sales), filename, start_et, end_et, args.dry_run)
