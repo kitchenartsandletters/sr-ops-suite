@@ -135,9 +135,9 @@ def build_section(title, rows, story, styles):
                 price_display = ""
 
         raw_collections = r.get("collections", [])
-        collections_text = ", ".join(raw_collections) if raw_collections else "None"
-        collections_display = f"Collections: {normalize_unicode(collections_text)}"
-        collections_para = Paragraph(collections_display, styles["CollectionsRow"])
+        # collections_text = ", ".join(raw_collections) if raw_collections else "None"
+        # collections_display = f"Collections: {normalize_unicode(collections_text)}"
+        # collections_para = Paragraph(collections_display, styles["CollectionsRow"])
 
         isbn_text = f"ISBN: {normalize_unicode(isbn_val)}" if isbn_val else "ISBN: —"
         isbn_para = Paragraph(isbn_text, styles["CollectionsRow"])
@@ -157,7 +157,7 @@ def build_section(title, rows, story, styles):
         )
 
         combined_row = [
-            collections_para,   # spans cols 0-1
+            "",                 # collections intentionally omitted
             "",                 # placeholder second col
             isbn_para,          # spans cols 2-3
             "",                 # placeholder fourth col
