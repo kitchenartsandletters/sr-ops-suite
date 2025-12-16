@@ -288,7 +288,9 @@ def fetch_orders_since_lop(
     """
     # Shopify order search query string; we use created_at lower bound, exclude canceled and refunded.
     # Example: created_at:>=2025-01-01T00:00:00Z AND -status:cancelled AND -financial_status:refunded
-    query_str = f"created_at:>={lop_created_at} AND -status:cancelled AND -financial_status:refunded"
+    lop_dt = parse_iso_date(lop_created_at)
+    lop_date_str = lop_dt.date().isoformat()
+    query_str = f"created_at:>={lop_date_str} AND -status:cancelled AND -financial_status:refunded"
 
     logging.info("Fetching orders since LOP (createdAt >= %s)...", lop_created_at)
 
@@ -311,8 +313,24 @@ def fetch_orders_since_lop(
 
         after = orders_conn["edges"][-1]["cursor"]
 
-    logging.info("Fetched %d orders created from LOP onward.", len(collected))
-    return collected
+    strict_collected = []
+    for o in collected:
+        created_at = o.get("createdAt")
+        if not created_at:
+            continue
+        o_dt = parse_iso_date(created_at)
+        if o_dt > lop_dt:
+            strict_collected.append(o)
+
+    logging.info(
+        "Post-filtered orders by exact timestamp: %d → %d",
+        len(collected),
+        len(strict_collected),
+    )
+
+    # logging.info("Fetched %d orders created from LOP onward.", len(collected))
+    # return collected
+    return strict_collected
 
 
 def filter_orders_requiring_shipping(orders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

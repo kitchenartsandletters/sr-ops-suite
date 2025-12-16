@@ -381,7 +381,7 @@ def aggregate_products(orders, product_details: dict):
             is_preorder = "Preorder" in collections
 
             # Blacklist
-            if pid in BLACKLISTED_PRODUCT_IDS or title.startswith("Cookbook Club:"):
+            if pid in BLACKLISTED_PRODUCT_IDS or "cookbook club" in title.lower():
                 continue
 
             # Attributes rolled into single column
