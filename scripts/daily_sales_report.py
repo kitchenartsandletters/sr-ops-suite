@@ -163,6 +163,7 @@ query ProductDetails($id: ID!) {
   product(id: $id) {
     id
     title
+    vendor
     totalInventory
     priceRangeV2 {
       minVariantPrice {
@@ -338,14 +339,15 @@ def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
 
         details[pid] = {
             "title": title,
+            "vendor": product.get("vendor") or "",
             "available": total_inv,
             "collections": collections,
             "incoming": incoming_total,
             "price": price,
         }
-
     logging.info("Enriched %d products with collections + incoming inventory.", len(details))
     return details
+    
 
 
 def aggregate_products(orders, product_details: dict):
@@ -376,6 +378,7 @@ def aggregate_products(orders, product_details: dict):
             available = pdetail.get("available", product.get("totalInventory"))
             incoming = pdetail.get("incoming", 0)
             price = pdetail.get("price")
+            vendor = pdetail.get("vendor", "")
 
             # Preorder = belongs to Preorder collection (from enrichment)
             is_preorder = "Preorder" in collections
@@ -424,6 +427,7 @@ def aggregate_products(orders, product_details: dict):
             if pid not in target:
                 target[pid] = {
                     "title": title,
+                    "vendor": vendor,
                     "author": sku or "",
                     "collections": collections,
                     "isbn": barcode or "NO BARCODE",
@@ -442,6 +446,7 @@ def aggregate_products(orders, product_details: dict):
                 bucket["collections"] = collections
                 bucket["title"] = title
                 bucket["price"] = price
+                bucket["vendor"] = vendor
                 if sku:
                     bucket["author"] = sku
                 if barcode:
@@ -479,6 +484,7 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
         header = [
             "Product",
             "Author",
+            "Vendor",
             "ISBN",
             "Price",
             "Collection",
@@ -494,6 +500,7 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
             writer.writerow([
                 info["title"],
                 info["author"],
+                info.get("vendor", ""),
                 info["isbn"],
                 info.get("price", ""),
                 ", ".join(info["collections"]),
@@ -513,6 +520,7 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
+                    info.get("vendor", ""),
                     info["isbn"],
                     info.get("price", ""),
                     ", ".join(info["collections"]),
@@ -532,6 +540,7 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
+                    info.get("vendor", ""),
                     info["isbn"],
                     info.get("price", ""),
                     ", ".join(info["collections"]),
@@ -551,6 +560,7 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 writer.writerow([
                     info["title"],
                     info["author"],
+                    info.get("vendor", ""),
                     info["isbn"],
                     info.get("price", ""),
                     ", ".join(info["collections"]),
