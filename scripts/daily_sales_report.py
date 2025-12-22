@@ -40,6 +40,7 @@ BLACKLISTED_PRODUCT_IDS = {
     "gid://shopify/Product/5238923001989",
     "gid://shopify/Product/6604620202117",
     "gid://shopify/Product/6589468967045",
+    "gid://shopify/Product/6830824489093",
 }
 
 """ MAILTRAP EMAIL DELIVERY """
