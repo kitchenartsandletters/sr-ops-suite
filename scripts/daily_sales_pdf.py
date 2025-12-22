@@ -87,13 +87,14 @@ def build_section(title, rows, story, styles):
     {
         "title": str,
         "author": str,
-        "collections": [...], 
+        "collections": [...],
         "isbn": str,
         "available": int | None,
         "ol_sold": int,
         "pos_sold": int,
         "attributes": str,
         "incoming": int,
+        "vendor": str,
     }
     """
     if not rows:
@@ -118,6 +119,7 @@ def build_section(title, rows, story, styles):
     for r in sort_rows(rows):
         title_val = Paragraph(normalize_unicode(r.get("title", "")), styles["MainRow"])
         author_val = Paragraph(normalize_unicode(r.get("author", "")), styles["MainRow"])
+        vendor_val = normalize_unicode(r.get("vendor", ""))
 
         on_hand = r.get("available", "")
         incoming = r.get("incoming", "")
@@ -157,11 +159,14 @@ def build_section(title, rows, story, styles):
         )
 
         combined_row = [
-            "",                 # collections intentionally omitted
-            "",                 # placeholder second col
-            isbn_para,          # spans cols 2-3
-            "",                 # placeholder fourth col
-            price_para          # stays in col 4
+            "",                       # column 0 (empty string instead of collections)
+            isbn_para,               # column 1 (no span)
+            price_para,              # column 2 (will span to col 3)
+            "",                      # placeholder col 3 for span
+            Paragraph(
+                f"Vendor: {vendor_val}" if vendor_val else "Vendor: —",
+                styles["CollectionsRow"]
+            ),                       # column 4
         ]
         data.append(combined_row)
         combined_row_indices.append(len(data) - 1)
@@ -193,9 +198,10 @@ def build_section(title, rows, story, styles):
     ]
 
     for row_idx in combined_row_indices:
-        base_style.append(("SPAN", (0, row_idx), (1, row_idx)))
+        # Remove: base_style.append(("SPAN", (0, row_idx), (1, row_idx)))
         base_style.append(("SPAN", (2, row_idx), (3, row_idx)))
-        base_style.append(("LEFTPADDING", (0, row_idx), (1, row_idx), 12))
+        base_style.append(("LEFTPADDING", (0, row_idx), (0, row_idx), 12))
+        base_style.append(("LEFTPADDING", (1, row_idx), (1, row_idx), 12))
         base_style.append(("LEFTPADDING", (2, row_idx), (3, row_idx), 12))
         base_style.append(("LEFTPADDING", (4, row_idx), (4, row_idx), 12))
         base_style.append(("BACKGROUND", (0, row_idx), (4, row_idx), colors.HexColor("#F0F0F0")))
