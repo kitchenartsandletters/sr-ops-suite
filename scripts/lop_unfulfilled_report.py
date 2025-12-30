@@ -19,11 +19,26 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from lop_unfulfilled_pdf import generate_lop_unfulfilled_pdf
+
 import requests
 import argparse
 
 from dotenv import load_dotenv
 from pathlib import Path
+
+
+# ------------------------ Article-agnostic sorting helper ------------------------ #
+def sort_title_key(title: str) -> str:
+    t = title.strip().lower()
+    for article in ("the ", "a ", "an "):
+        if t.startswith(article):
+            return t[len(article):]
+    return t
+
+# Out-of-Print (OP) detection helper
+def is_op_title(title: str) -> bool:
+    return title.strip().upper().startswith("OP:")
 
 # Ensure .env is loaded from the project root (one level above /scripts)
 env_path = Path(__file__).resolve().parents[1] / ".env"
@@ -181,6 +196,26 @@ query OrderLineItemsMore($id: ID!, $first: Int!, $after: String) {
 }
 """
 
+PRODUCT_ENRICH_QUERY = """
+query ProductEnrich($title: String!) {
+  products(first: 1, query: $title) {
+    edges {
+      node {
+        title
+        totalInventory
+        collections(first: 10) {
+          edges {
+            node {
+              title
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 # ------------------------ Core Logic ------------------------ #
 
@@ -275,6 +310,34 @@ def collect_line_items_with_pagination(client: ShopifyClient, order_node: Dict[s
     return line_items
 
 
+def get_product_enrichment(
+    client: ShopifyClient,
+    product_title: str,
+    cache: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    if product_title in cache:
+        return cache[product_title]
+
+    data = client.graphql(PRODUCT_ENRICH_QUERY, {"title": product_title})
+    edges = data.get("products", {}).get("edges", [])
+    if not edges:
+        cache[product_title] = {"collections": [], "available": None}
+        return cache[product_title]
+
+    product = edges[0]["node"]
+    collections = [
+        e["node"]["title"]
+        for e in product.get("collections", {}).get("edges", [])
+    ]
+    available = product.get("totalInventory")
+
+    cache[product_title] = {
+        "collections": collections,
+        "available": available,
+    }
+    return cache[product_title]
+
+
 def fetch_orders_since_lop(
     client: ShopifyClient,
     lop_created_at: str,
@@ -358,68 +421,195 @@ def filter_orders_requiring_shipping(orders: List[Dict[str, Any]]) -> List[Dict[
     return qualifying
 
 
-def build_csv_rows(client: ShopifyClient, orders: List[Dict[str, Any]]) -> Tuple[List[List[Any]], List[List[Any]]]:
+def build_csv_rows(client: ShopifyClient, orders: List[Dict[str, Any]]) -> Tuple[List[List[Any]], List[List[Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Returns:
       - detail_rows for Section A
       - summary_rows for Section B
-    Each detail row: [Order #, Product, SKU, QTY, Notes]
+      - incomplete_orders: list of {"order": order_name, "reason": ...}
+    Each detail row: [Order #, Product, SKU, QTY, Notes, Attributes]
     """
     detail_rows: List[List[Any]] = []
     summary_agg: Dict[Tuple[str, str], int] = {}
+
+    product_cache: Dict[str, Dict[str, Any]] = {}
+    order_product_availability: Dict[str, Dict[str, set]] = {}
+    incomplete_orders: List[Dict[str, Any]] = []
+
+    pdf_order_view_rows: List[Dict[str, Any]] = []
+    pdf_incomplete_rows: List[Dict[str, Any]] = []
 
     for order in orders:
         order_name = order.get("name")
         note = order.get("note") or ""
         line_items = collect_line_items_with_pagination(client, order)
 
+        order_product_availability[order_name] = {}
+        order_has_non_op = False
+
+        # Track preorder/backorder status for TQV and incomplete orders
         for li in line_items:
             product_title = li["title"]
             qty = li["quantity"]
-            sku = li.get("sku") or ""
+            author = li.get("sku") or ""
 
-            detail_rows.append(
-                [order_name, product_title, sku, qty, note]
-            )
+            attributes = []
 
-            key = (product_title, sku)
-            summary_agg[key] = summary_agg.get(key, 0) + qty
+            # Quantity-based attribute
+            if qty > 1:
+                attributes.append("Multi-Qty")
 
-    # Build summary rows sorted by product title then SKU
+            # Notes are only shown in Notes column, not as attribute
+
+            is_op = is_op_title(product_title)
+            is_preorder = False
+            is_backorder = False
+            avail_class = None
+
+            if is_op:
+                avail_class = "op"
+                # OP titles are never oversold and never cause incomplete orders
+            else:
+                order_has_non_op = True
+                enrich = get_product_enrichment(client, product_title, product_cache)
+                collections = enrich.get("collections", [])
+                available = enrich.get("available")
+
+                # If product is in a preorder collection, only mark as Preorder, never Backorder
+                if any("preorder" in c.lower() for c in collections):
+                    attributes.append("Preorder")
+                    is_preorder = True
+                    avail_class = "preorder"
+                else:
+                    # Not preorder, check for backorder status by inventory
+                    if available is not None:
+                        if available < 0:
+                            attributes.append("Backorder")
+                            is_backorder = True
+                            avail_class = "backorder"
+                        elif available == 0:
+                            avail_class = "out_of_stock"
+                        else:
+                            avail_class = "in_stock"
+                    else:
+                        avail_class = "unknown"
+
+            prod_avail = order_product_availability[order_name].setdefault(product_title, set())
+            prod_avail.add(avail_class)
+
+            attr_label = ", ".join(attributes)
+
+            row_idx = len(detail_rows)
+            detail_rows.append([order_name, product_title, author, qty, note, attr_label])
+
+            # Append PDF order view row
+            pdf_order_view_rows.append({
+                "order_number": order_name,
+                "product": product_title,
+                "author": author,
+                "qty": qty,
+                "notes": note,
+                "attributes": attr_label,
+                "emphasis_flags": set(attributes),
+            })
+
+            # Exclude Preorder and Backorder from TQV
+            if not is_preorder and not is_backorder:
+                key = (product_title, author)
+                summary_agg[key] = summary_agg.get(key, 0) + qty
+
+            # INCOMPLETE ORDERS per line item (not per order)
+            if is_preorder:
+                incomplete_orders.append({
+                    "order": order_name,
+                    "product": product_title,
+                    "qty": qty,
+                    "reason": "Preorder"
+                })
+                pdf_incomplete_rows.append({
+                    "order_number": order_name,
+                    "product": product_title,
+                    "author": author,
+                    "qty": qty,
+                    "reason": "Preorder"
+                })
+            elif is_backorder:
+                incomplete_orders.append({
+                    "order": order_name,
+                    "product": product_title,
+                    "qty": qty,
+                    "reason": "Backorder"
+                })
+                pdf_incomplete_rows.append({
+                    "order_number": order_name,
+                    "product": product_title,
+                    "author": author,
+                    "qty": qty,
+                    "reason": "Backorder"
+                })
+
+        for i, row in enumerate(detail_rows):
+            o_name, p_title = row[0], row[1]
+            if o_name == order_name:
+                classes = order_product_availability[order_name].get(p_title, set())
+                if len(classes) > 1 and "Mixed Availability" not in row[5]:
+                    row[5] = ", ".join(
+                        [x for x in row[5].split(", ") if x] + ["Mixed Availability"]
+                    )
+
+    # Build summary rows sorted by qty DESC, then product title ignoring leading articles
     summary_rows: List[List[Any]] = []
-    for (product_title, sku), total_qty in sorted(summary_agg.items(), key=lambda x: (x[0][0], x[0][1])):
-        summary_rows.append([product_title, sku, total_qty])
+    sorted_keys = sorted(
+        summary_agg.items(),
+        key=lambda x: (-x[1], sort_title_key(x[0][0]))
+    )
+    for (product_title, author), qty in sorted_keys:
+        # TOTAL QUANTITY VIEW: [QTY, Product, Author]
+        summary_rows.append([qty, product_title, author])
 
-    return detail_rows, summary_rows
+    return detail_rows, summary_rows, incomplete_orders, pdf_order_view_rows, pdf_incomplete_rows
 
 
 def write_report_csv(
     detail_rows: List[List[Any]],
     summary_rows: List[List[Any]],
+    incomplete_orders: List[Dict[str, Any]],
     output_path: str,
 ) -> None:
     """
-    Write a CSV with two sections:
-      Section A: headers + detail rows
-      (blank line)
-      Section B: headers + summary rows
+    Write a CSV with ORDER VIEW, TOTAL QUANTITY VIEW, and INCOMPLETE ORDERS sections.
     """
     logging.info("Writing CSV report to %s", output_path)
     with open(output_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
 
-        # Section A header
-        writer.writerow(["Order #", "Product", "SKU", "QTY", "Notes"])
+        # ORDER VIEW section
+        writer.writerow(["ORDER VIEW"] + [""] * 5)
+        writer.writerow([])
+        writer.writerow(["Order #", "Product", "Author", "QTY", "Notes", "Attributes"])
         for row in detail_rows:
             writer.writerow(row)
 
-        # Blank separator row
+        # Blank row before TOTAL QUANTITY VIEW section
         writer.writerow([])
-
-        # Section B header
-        writer.writerow(["Product", "SKU", "Total QTY Needed"])
+        writer.writerow(["TOTAL QUANTITY VIEW"])
+        writer.writerow([])
+        writer.writerow(["QTY", "Product", "Author"])
         for row in summary_rows:
             writer.writerow(row)
+
+        # Blank row before INCOMPLETE ORDERS section
+        writer.writerow([])
+        writer.writerow(["INCOMPLETE ORDERS"])
+        writer.writerow([])
+        writer.writerow(["Order #", "Product", "QTY", "Reason"])
+        for inc in incomplete_orders:
+            writer.writerow([
+                inc.get("order", ""),
+                inc.get("product", ""),
+                inc.get("qty", ""),
+                inc.get("reason", ""),
+            ])
 
 
 def main() -> None:
@@ -445,7 +635,29 @@ def main() -> None:
         return
 
     # 4) Build CSV rows
-    detail_rows, summary_rows = build_csv_rows(client, qualifying_orders)
+    detail_rows, summary_rows, incomplete_orders, pdf_order_view_rows, pdf_incomplete_rows = build_csv_rows(client, qualifying_orders)
+
+    # TQV rows for PDF should mirror TOTAL QUANTITY VIEW from CSV
+    tqv_rows = [
+        {
+            "qty": row[0],
+            "product": row[1],
+            "author": row[2],
+        }
+        for row in summary_rows
+    ]
+
+    # OP rows: Out-of-Print titles (never incomplete, informational only)
+    op_rows = []
+    for row in detail_rows:
+        order_name, product_title, author, qty, note, attrs = row
+        if is_op_title(product_title):
+            op_rows.append({
+                "order_number": order_name,
+                "product": product_title,
+                "author": author,
+                "qty": qty,
+            })
 
     if args.dry_run:
         logging.info("Dry run enabled — skipping CSV write.")
@@ -454,7 +666,19 @@ def main() -> None:
     # 5) Write CSV
     today_str = datetime.utcnow().strftime("%Y%m%d")
     output_path = f"lop_unfulfilled_orders_report_{today_str}.csv"
-    write_report_csv(detail_rows, summary_rows, output_path)
+    write_report_csv(detail_rows, summary_rows, incomplete_orders, output_path)
+
+    # Generate PDF report
+    pdf_path = output_path.replace(".csv", ".pdf")
+    generate_lop_unfulfilled_pdf(
+        order_view_rows=pdf_order_view_rows,
+        tqv_rows=tqv_rows,
+        op_rows=op_rows,
+        incomplete_orders_rows=pdf_incomplete_rows,
+        output_path=pdf_path,
+        report_title="Unfulfilled Orders Since LOP",
+        subtitle=f"Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+    )
 
     logging.info("Report generation complete.")
 
