@@ -148,7 +148,7 @@ app.post('/isbn/prices', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
