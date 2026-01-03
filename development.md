@@ -178,6 +178,48 @@ Sequencing matters. These come later.
    - Attributes column
 3. PDF builder scaffold (`lop_unfulfilled_pdf.py`)
 4. Aggregate / Incomplete Orders view
+
+---
+
+## LOP Unfulfilled PDF — Presentation Layer (Locked)
+
+The PDF companion script `lop_unfulfilled_pdf.py` is a **pure presentation layer**.
+
+It must **mirror the CSV logic exactly** and must never re-derive or reinterpret business rules.
+
+### Canonical Rules (Non-Negotiable)
+
+- The PDF consumes structured data produced by `lop_unfulfilled_report`
+- No inventory checks, collection checks, or order classification logic may exist in the PDF layer
+- All flags, attributes, and classifications are passed in, not recomputed
+
+### Visual Emphasis Rules (Approved)
+
+The PDF may apply **visual emphasis only** for the following cases:
+
+- **Multi-quantity line items**
+  - Quantity > 1
+  - Emphasized visually (font weight, shading, or iconography)
+
+- **Notes present**
+  - Orders with notes may be visually flagged
+  - Notes content is not altered
+
+- **Incomplete items**
+  - Items classified as `Preorder` or `Backorder`
+  - Must be visually distinct
+  - Uses the same mutually exclusive classification defined in CSV logic
+
+### Explicitly Forbidden in PDF Layer
+
+- Re-inferring Preorder or Backorder state
+- Looking up inventory or collections
+- Combining or splitting quantities
+- Introducing new classifications
+- Hiding data present in CSV
+
+The PDF exists to improve **readability and scanning**, not to change meaning.
+
 5. Allocation-aware quantity splitting (future phase)
 
 ---
