@@ -36,10 +36,7 @@ async function queryShopify(isbns: string[]) {
         edges {
           node {
             barcode
-            priceV2 {
-              amount
-              currencyCode
-            }
+            price
             product {
               title
             }
@@ -63,10 +60,7 @@ async function queryShopify(isbns: string[]) {
         edges {
           node {
             barcode
-            priceV2 {
-              amount
-              currencyCode
-            }
+            price
             product {
               title
             }
@@ -128,8 +122,8 @@ app.post('/isbn/prices', async (req: Request, res: Response): Promise<void> => {
         if (variantMap[isbn]) {
           const v = variantMap[isbn];
           resultsMap[isbn] = {
-            price: v.priceV2.amount,
-            currencyCode: v.priceV2.currencyCode,
+            price: v.price,
+            currencyCode: "USD",
             title: v.product.title,
           };
         } else {
