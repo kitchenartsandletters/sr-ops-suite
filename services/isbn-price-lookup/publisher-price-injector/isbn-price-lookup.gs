@@ -113,7 +113,11 @@ function library_injectListPrices() {
   for (let i = 0; i < rowsToUpdate.length; i++) {
     const rowIndex = rowsToUpdate[i];
     const price = json.results[i];
-    sheet.getRange(rowIndex + 1, listPriceCol + 1).setValue(price !== null && price !== undefined ? price : 'NOT FOUND');
+    if (price && typeof price === 'object' && price.hasOwnProperty('price')) {
+      sheet.getRange(rowIndex + 1, listPriceCol + 1).setValue(price.price);
+    } else {
+      sheet.getRange(rowIndex + 1, listPriceCol + 1).setValue('NOT FOUND');
+    }
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast('List Prices updated for ' + rowsToUpdate.length + ' rows.', 'Publisher Tools');
