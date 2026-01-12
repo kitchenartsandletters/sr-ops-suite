@@ -11,13 +11,16 @@ You only need to be clear and consistent when updating a request.
 
 What this channel is (and is not)
 
-This channel is
-	•	A shared log of customer book requests
-	•	A place to record status updates that others can see
-	•	A reference point for follow-ups
+This channel is a shared log of customer book requests that exist outside of Shopify orders and must be tracked manually in Slack until they are fulfilled or cancelled.
 
-This channel is not
-	•	A private to-do list
+It is used to:
+	•	Record visible status updates
+	•	Serve as a shared reference point for follow-ups
+
+This channel is not:
+	•	A place for ideas or general recommendations
+	•	A system for order management or customer service tickets
+	•	A repository for hard-to-source, out-of-print, or special-effort titles
 	•	A place where silence means “done”
 	•	A system that automatically knows what happened
 
@@ -42,7 +45,6 @@ You do not need to mark every stage — only the important ones.
 How the system understands requests
 
 The system reads only what is written in Slack.
-It does not guess.
 
 Here’s how it interprets things:
 
@@ -91,14 +93,15 @@ What this looks like
 Recommended wording
 	•	Ordered
 	•	On order
-	•	Placed order with distributor
+	•	Added to next RDH order
+    •	Stocky PO# 1740
 
 What it means
 	•	The book has been ordered
 	•	It has not necessarily arrived yet
 
 ⚠️ Important
-	•	If you don’t say “ordered,” the system will not assume it was ordered
+	•	If you don’t say “ordered," "order," or "PO" the system will not assume it was ordered
 	•	Silence ≠ ordered
 
 ⸻
@@ -205,4 +208,8 @@ Slack is the record.
 
 If it’s not written in the thread, it didn’t happen as far as the system knows.
 
-Thank you for helping keep requests clear and customers happy.
+To add:
+- out-of-print requests -> how to handle
+- if referencing anything linkable, do so -> emails can be linked to
+- state: we want to automate the system but we must adhere to it and eke out any gaps before introducing any automation.
+- automated future: notifications to cull stale or dormant requests, request rot
