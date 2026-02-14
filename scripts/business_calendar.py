@@ -47,6 +47,27 @@ HOLIDAY_CLOSURES_2025 = {
 }
 
 # ----------------------------
+# 1b. Static Calendar Data — 2026
+# ----------------------------
+
+SPECIAL_OPEN_SUNDAYS_2026 = {
+    date(2026, 12, 6),
+    date(2026, 12, 13),
+    date(2026, 12, 20),
+}
+
+HOLIDAY_CLOSURES_2026 = {
+    date(2026, 1, 1),     # New Year's Day
+    date(2026, 5, 23),    # Saturday before Memorial Day
+    date(2026, 5, 24),    # Memorial Day Sunday closure
+    date(2026, 7, 4),     # Independence Day
+    date(2026, 9, 7),     # Labor Day
+    date(2026, 11, 26),   # Thanksgiving
+    date(2026, 12, 25),   # Christmas
+    date(2026, 12, 26),   # Boxing Day
+}
+
+# ----------------------------
 # 2. Business Day Logic
 # ----------------------------
 
@@ -57,21 +78,33 @@ def is_business_day(d: date) -> bool:
     Sundays are closed EXCEPT special open Sundays.
     """
 
-    # Holiday closures override everything
-    if d in HOLIDAY_CLOSURES_2025:
-        result = False
-        logging.debug(f"is_business_day({d}) -> {result}")
-        return result
+    year = d.year
 
-    # Special open Sundays
+    if year == 2025:
+        holiday_set = HOLIDAY_CLOSURES_2025
+        special_open_sundays = SPECIAL_OPEN_SUNDAYS_2025
+    elif year == 2026:
+        holiday_set = HOLIDAY_CLOSURES_2026
+        special_open_sundays = SPECIAL_OPEN_SUNDAYS_2026
+    else:
+        # Safe fallback for future years
+        holiday_set = set()
+        special_open_sundays = set()
+
+    # Holiday closures override everything
+    if d in holiday_set:
+        logging.debug(f"is_business_day({d}) -> False (holiday)")
+        return False
+
+    # Sunday logic
     if d.weekday() == 6:  # Sunday
-        result = d in SPECIAL_OPEN_SUNDAYS_2025
-        logging.debug(f"is_business_day({d}) -> {result}")
+        result = d in special_open_sundays
+        logging.debug(f"is_business_day({d}) -> {result} (sunday logic)")
         return result
 
     # Normal business days: Mon (0) → Sat (5)
     result = d.weekday() in (0, 1, 2, 3, 4, 5)
-    logging.debug(f"is_business_day({d}) -> {result}")
+    logging.debug(f"is_business_day({d}) -> {result} (weekday logic)")
     return result
 
 
