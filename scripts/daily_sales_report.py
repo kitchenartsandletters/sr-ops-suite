@@ -645,7 +645,7 @@ def main():
     if not args.dry_run:
         filepath = os.path.join(os.getcwd(), filename)
 
-        subject = f"📊 Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
+        subject = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
         html_body = (
             "<p>Your daily sales report is attached.</p>"
             f"<p><strong>{filename}</strong></p>"

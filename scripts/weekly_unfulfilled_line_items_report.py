@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Weekly Unfulfilled Line Items (Age / Order Date Companion Report)
 
@@ -19,6 +20,13 @@ Outputs:
 2) PRODUCT SUMMARY CSV (risk-focused: inventory <= 0, committed > 0, NOT in Preorder collection)
 """
 
+# -----------------------------
+# Hardcoded blacklist rules
+# -----------------------------
+BLACKLISTED_TITLE_PREFIXES = [
+    "Kitchen Arts & Letters Gift Card",
+]
+
 import os
 import csv
 import logging
@@ -32,6 +40,70 @@ from dotenv import load_dotenv
 
 # Reuse your existing ShopifyClient (same as your other scripts)
 from lop_unfulfilled_report import ShopifyClient
+
+# -----------------------------
+# Mailtrap helpers (cron email)
+# -----------------------------
+import base64
+import requests
+
+def validate_env_for_mailtrap():
+    required = ["MAILTRAP_API_TOKEN", "EMAIL_SENDER", "EMAIL_RECIPIENTS"]
+    missing = [var for var in required if not os.getenv(var)]
+    if missing:
+        raise EnvironmentError(f"Missing Mailtrap environment variables: {', '.join(missing)}")
+
+def prepare_mailtrap_attachments(filepaths):
+    attachments = []
+    for fp in filepaths:
+        if not os.path.exists(fp):
+            logging.warning(f"[weekly-unfulfilled] Attachment missing: {fp}")
+            continue
+        with open(fp, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+        attachments.append({
+            "filename": os.path.basename(fp),
+            "content": encoded,
+            "type": "text/csv",
+            "disposition": "attachment",
+        })
+    return attachments
+
+def send_mailtrap_email(subject, html_body, attachments=None):
+    validate_env_for_mailtrap()
+
+    url = "https://send.api.mailtrap.io/api/send"
+    token = os.getenv("MAILTRAP_API_TOKEN")
+    sender = os.getenv("EMAIL_SENDER")
+    recipient_list = os.getenv("EMAIL_RECIPIENTS", "")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    to_addresses = [
+        {"email": r.strip()}
+        for r in recipient_list.split(",")
+        if r.strip()
+    ]
+
+    payload = {
+        "from": {"email": sender, "name": "Weekly Unfulfilled Line Items Report"},
+        "to": to_addresses,
+        "subject": subject,
+        "html": html_body,
+    }
+
+    if attachments:
+        payload["attachments"] = attachments
+
+    resp = requests.post(url, headers=headers, json=payload)
+    if resp.status_code != 200:
+        logging.error(f"[weekly-unfulfilled] Mailtrap error {resp.status_code}: {resp.text}")
+        raise RuntimeError("Weekly unfulfilled report email failed.")
+
+    logging.info("📧 Weekly unfulfilled report email sent successfully.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -185,6 +257,21 @@ class ProductSnapshot:
     collections: List[str]
     committed: int  # canonical unfulfilled
     is_preorder: bool
+
+
+# -----------------------------
+# Blacklist helper
+# -----------------------------
+def is_blacklisted_product(product: ProductSnapshot) -> bool:
+    """
+    Returns True if product title matches any blacklist rule.
+    Mirrors weekly_maintenance_report behavior.
+    """
+    title = (product.title or "").strip().lower()
+    for prefix in BLACKLISTED_TITLE_PREFIXES:
+        if title.startswith(prefix.lower()):
+            return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -489,6 +576,10 @@ def attach_attributes_and_vendor(
         if p.is_preorder:
             continue
 
+        # Exclude blacklisted products
+        if is_blacklisted_product(p):
+            continue
+
         r.product_title = p.title or r.product_title
         r.product_vendor = p.vendor or r.product_vendor
         r.attributes = derive_attributes_for_line(r, p)
@@ -518,6 +609,10 @@ def compute_product_age_summary(
         if not p:
             continue
         if not is_risk_product(p):
+            continue
+
+        # Exclude blacklisted products from summary
+        if is_blacklisted_product(p):
             continue
 
         earliest = min(x.processed_at_utc for x in plist)
@@ -742,22 +837,37 @@ def main():
     # 3) Attach stable attributes + vendor/title preference (no inference drift)
     rows = attach_attributes_and_vendor(rows, product_cache)
 
-    # 4) Build risk-focused product summary (committed model decides inclusion)
-    summary_rows = compute_product_age_summary(rows, product_cache)
-
-    # 5) Write CSVs
+    # 4) Write CSV (line item view only)
     outdir = Path(args.output_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     line_csv = outdir / f"weekly_unfulfilled_line_items_{stamp}.csv"
-    prod_csv = outdir / f"weekly_unfulfilled_risk_products_{stamp}.csv"
 
     write_line_item_csv(rows, line_csv, start_utc, end_utc, args.dry_run)
-    write_product_summary_csv(summary_rows, prod_csv, start_utc, end_utc, args.dry_run)
 
     if args.dry_run:
-        logging.info("Dry run complete.")
-    else:
-        logging.info("Done.")
+        logging.info("Dry run complete — skipping email send.")
+        return
+
+    # 6) Email CSVs (Railway cron mode)
+    today_et = datetime.now(ET)
+    subject = f"Weekly Unfulfilled Line Items — {today_et.strftime('%B %d, %Y')}"
+
+    html_body = f"""
+    <p>Attached is the weekly unfulfilled line item report:</p>
+    <ul>
+      <li><strong>Line Item View</strong> — individual unfulfilled line items (age + heatmap)</li>
+    </ul>
+    <p>Window (ET): {utc_to_et_str(start_utc)} → {utc_to_et_str(end_utc)}</p>
+    """
+
+    attachments = prepare_mailtrap_attachments([
+        str(line_csv),
+    ])
+
+    logging.info("📨 Sending weekly unfulfilled email via Mailtrap...")
+    send_mailtrap_email(subject, html_body, attachments)
+
+    logging.info("Done.")
 
 if __name__ == "__main__":
     main()

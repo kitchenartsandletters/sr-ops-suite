@@ -503,7 +503,7 @@ def main():
         str(fn_oos),
     ])
 
-    subject = f"🧹 Weekly Maintenance Report — {today_et.strftime('%B %d, %Y')}"
+    subject = f"Weekly Maintenance Report — {today_et.strftime('%B %d, %Y')}"
     html_body = """
     <p>Attached are the weekly maintenance reports for inventory and order hygiene:</p>
     <ul>
