@@ -15,8 +15,5 @@ COPY . /app
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Ensure scripts are executable
-RUN chmod +x run.sh
-
 # Run via shell script
-CMD ["bash", "run.sh"]
+CMD ["sh", "/app/cron/weekly_unfulfilled_line_items/run.sh"]
