@@ -1,5 +1,3 @@
-# cron/weekly_unfulfilled_line_items/Dockerfile
-
 FROM python:3.12-slim
 
 # Set working directory inside container
@@ -12,13 +10,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy entire repo into container
-COPY ../../ /app
+COPY . /app
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Ensure scripts are executable
-RUN chmod +x cron/weekly_unfulfilled_line_items/run.sh
+RUN chmod +x run.sh
 
 # Run via shell script
-CMD ["bash", "cron/weekly_unfulfilled_line_items/run.sh"]
+CMD ["bash", "run.sh"]
