@@ -104,8 +104,24 @@ def send_mailtrap_email(subject, html_body, attachments=None):
         logging.info("📧 Daily sales report email sent successfully.")
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Generate Daily Sales Report (24h rolling window).")
-    parser.add_argument("--dry-run", action="store_true", help="Run without writing CSV output.")
+    parser = argparse.ArgumentParser(description="Generate Daily Sales Report (business-defined rolling window).")
+    parser.add_argument("--dry-run", action="store_true", help="Run without writing CSV/PDF or sending email.")
+
+    # Ad-hoc override: specify explicit calendar date boundaries (ET).
+    # Window expansion still follows the 10:00 AM → 9:59:59 AM ET convention.
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Override window start date (ET) in YYYY-MM-DD. Start time will be 10:00 AM ET on this date.",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="Override window end date (ET) in YYYY-MM-DD. End time will be 9:59:59 AM ET on this date.",
+    )
+
     return parser.parse_args()
 
 
@@ -585,19 +601,45 @@ def main():
     tz_et = ZoneInfo("America/New_York")
     today_et = datetime.now(tz_et)
 
-    # Skip report on non-business days
-    if not is_business_day(today_et.date()):
-        logging.info(f"Today ({today_et.date()}) is not a business day — skipping report.")
-        return
+    def _parse_ymd(s: str):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except Exception:
+            raise ValueError(f"Invalid date '{s}'. Expected YYYY-MM-DD.")
 
-    start_date, _ = get_reporting_window(today_et.date())
-    end_date = today_et.date()
+    # If an explicit date range is provided, we run even if 'today' is closed.
+    # Otherwise, we respect the business calendar and skip closed days.
+    if args.start_date or args.end_date:
+        start_date = _parse_ymd(args.start_date) if args.start_date else None
+        end_date = _parse_ymd(args.end_date) if args.end_date else None
 
-    start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
-    end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59, tzinfo=tz_et)
+        if start_date is None:
+            # Default start to the normal calendar-derived start (last open business day).
+            start_date, _ = get_reporting_window(today_et.date())
+        if end_date is None:
+            end_date = today_et.date()
+
+        if end_date < start_date:
+            raise ValueError(f"end-date {end_date} cannot be before start-date {start_date}")
+
+        start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
+        end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59, tzinfo=tz_et)
+    else:
+        # Skip report on non-business days
+        if not is_business_day(today_et.date()):
+            logging.info(f"Today ({today_et.date()}) is not a business day — skipping report.")
+            return
+
+        start_date, _ = get_reporting_window(today_et.date())
+        end_date = today_et.date()
+
+        start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
+        end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59, tzinfo=tz_et)
 
     logging.info(f"Reporting window start ET: {start_et}")
     logging.info(f"Reporting window end ET: {end_et}")
+    if args.start_date or args.end_date:
+        logging.info(f"Using override date range: {start_date} → {end_date} (ET dates)")
 
     now_et = today_et
 
@@ -621,25 +663,26 @@ def main():
     pdf_filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf"
     pdf_path = os.path.join(os.getcwd(), pdf_filename)
 
-    sections = {
-        "main":        list(main_sales.values()),
-        "backorders":  list(backorder_sales.values()),
-        "out_of_stock": list(oos_sales.values()),
-        "preorders":   list(preorder_sales.values()),
-    }
+    if not args.dry_run:
+        sections = {
+            "main":        list(main_sales.values()),
+            "backorders":  list(backorder_sales.values()),
+            "out_of_stock": list(oos_sales.values()),
+            "preorders":   list(preorder_sales.values()),
+        }
 
-    report_title = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
-    window_text = (
-        f"{start_et.strftime('%b %d %Y %I:%M %p ET')} → "
-        f"{end_et.strftime('%b %d %Y %I:%M %p ET')}"
-    )
+        report_title = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
+        window_text = (
+            f"{start_et.strftime('%b %d %Y %I:%M %p ET')} → "
+            f"{end_et.strftime('%b %d %Y %I:%M %p ET')}"
+        )
 
-    generate_daily_sales_pdf(
-        sections,
-        pdf_path,
-        report_title,
-        window_text,
-    )
+        generate_daily_sales_pdf(
+            sections,
+            pdf_path,
+            report_title,
+            window_text,
+        )
 
     # === MAILTRAP EMAIL DELIVERY ===
     if not args.dry_run:
