@@ -107,7 +107,7 @@ def claim_next_job():
     """
     Atomically claim the next queued job via RPC.
     """
-    resp = supabase.rpc("reports_claim_next_job").execute()
+    resp = supabase.rpc("reports_claim_next_job", schema="reports").execute()
 
     if resp.data:
         return resp.data[0]
