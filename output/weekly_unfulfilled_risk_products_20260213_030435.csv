@@ -1,5 +1,0 @@
-REPORT,UNFULFILLED RISK PRODUCTS (COMMITTED MODEL)
-WINDOW_UTC,2025-12-06T15:00:00+00:00 → 2025-12-08T15:00:00+00:00
-GENERATED_UTC,2026-02-13T03:04:35.441124+00:00
-
-Product,Vendor,Collections,Total Inventory,Committed (Canonical),Earliest Unfulfilled Order (UTC),Latest Unfulfilled Order (UTC),Age (days),Unfulfilled Line Items (count)
