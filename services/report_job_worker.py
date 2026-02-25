@@ -188,14 +188,17 @@ async def worker_loop():
         try:
             job = claim_next_job()
 
-            if job:
-                await process_job(job)
-            else:
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            if not job:
+                # No job available
+                await asyncio.sleep(5)
+                continue
+
+            logging.info(f"[worker] Processing job {job['id']} ({job.get('report_id')})")
+            await process_job(job)
 
         except Exception:
             logging.exception("[worker] Unexpected error in worker loop.")
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(5)
 
 
 # ─────────────────────────────────────────────────────────────
