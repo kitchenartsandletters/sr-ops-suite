@@ -188,12 +188,15 @@ async def worker_loop():
         try:
             job = claim_next_job()
 
-            if not job:
-                # No job available
-                await asyncio.sleep(5)
+            # No job returned (None, empty dict, etc.)
+            if not job or not isinstance(job, dict) or not job.get("id"):
+                await asyncio.sleep(POLL_INTERVAL_SECONDS)
                 continue
 
-            logging.info(f"[worker] Processing job {job['id']} ({job.get('report_id')})")
+            logging.info(
+                f"[worker] Processing job {job.get('id')} ({job.get('report_id')})"
+            )
+
             await process_job(job)
 
         except Exception:
