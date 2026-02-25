@@ -104,13 +104,21 @@ REPORT_EXECUTORS = {
 # ─────────────────────────────────────────────────────────────
 
 def claim_next_job():
-    """
-    Atomically claim the next queued job via RPC.
-    """
     resp = supabase.rpc("reports_claim_next_job").execute()
 
-    if resp.data:
-        return resp.data[0]
+    data = resp.data
+
+    # No job returned
+    if not data:
+        return None
+
+    # If function returns a single object
+    if isinstance(data, dict):
+        return data
+
+    # If function returns list
+    if isinstance(data, list) and len(data) > 0:
+        return data[0]
 
     return None
 
