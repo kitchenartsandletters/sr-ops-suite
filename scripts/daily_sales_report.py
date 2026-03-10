@@ -623,8 +623,9 @@ def main():
             raise ValueError(f"end-date {end_date} cannot be before start-date {start_date}")
 
         start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0).replace(tzinfo=tz_et)
-end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59).replace(tzinfo=tz_et)
-    else:
+        end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59).replace(tzinfo=tz_et)
+    
+else:
         # Skip report on non-business days
         if not is_business_day(today_et.date()):
             logging.info(f"Today ({today_et.date()}) is not a business day — skipping report.")
