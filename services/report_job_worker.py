@@ -86,6 +86,7 @@ def execute_daily_sales(parameters: dict):
         write_csv=True,
         write_pdf=True,
         send_email=True,
+        parameters=parameters,   # ← pass the full job parameters dict through
     )
 
     return result
