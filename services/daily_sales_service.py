@@ -14,20 +14,28 @@ Email subject/body:
   - Automated run, standard window:
       Subject: "Daily Sales Report — Monday, April 13, 2026"
   - Automated run, admin-overridden window:
-      Subject: "Daily Sales Report — Apr 10–13, 2026 (Extended Window)"
+      Subject: "Daily Sales Report — Apr 10-13, 2026 (Extended Window)"
       Body:    notes the extended coverage + label if set
   - On-demand manual run with custom date range:
-      Subject: "Daily Sales Report — Apr 10–13, 2026 (On-Demand)"
+      Subject: "Daily Sales Report — Apr 10-13, 2026 (On-Demand)"
       Body:    notes manually triggered with custom range
 """
 
 import os
+import sys
 import logging
 from datetime import datetime, timezone, date
 from zoneinfo import ZoneInfo
 from typing import Dict
 
-from scripts.daily_sales_report import (
+# scripts/ uses bare imports (e.g. "from daily_sales_pdf import ...") which only
+# resolve when scripts/ is on sys.path. Adding it here prevents the broken import
+# chain that occurs when daily_sales_report.py is imported as a module from services/.
+_scripts_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+if _scripts_path not in sys.path:
+    sys.path.insert(0, _scripts_path)
+
+from daily_sales_report import (
     fetch_24h_orders,
     extract_product_ids,
     fetch_product_details,
@@ -37,8 +45,8 @@ from scripts.daily_sales_report import (
     prepare_mailtrap_attachments,
     send_mailtrap_email,
 )
-from scripts.daily_sales_pdf import generate_daily_sales_pdf
-from scripts.business_calendar import get_reporting_window
+from daily_sales_pdf import generate_daily_sales_pdf
+from business_calendar import get_reporting_window
 from shopify_client import ShopifyClient
 from services.supabase_client import supabase
 
