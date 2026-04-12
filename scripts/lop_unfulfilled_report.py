@@ -24,7 +24,7 @@ from lop_unfulfilled_pdf import generate_lop_unfulfilled_pdf
 import requests
 import argparse
 
-from services.shopify_client import ShopifyClient
+from shopify_client import ShopifyClient
 
 from dotenv import load_dotenv
 from pathlib import Path
