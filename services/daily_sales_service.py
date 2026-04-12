@@ -84,6 +84,7 @@ def _check_schedule_override(report_id: str, run_date: date) -> dict | None:
     try:
         resp = (
             supabase
+            .schema("reports")
             .table("report_schedule_overrides")
             .select("id, start_date, end_date, label")
             .eq("report_id", report_id)
@@ -103,6 +104,7 @@ def _mark_override_used(override_id: str) -> None:
     """Mark a schedule override as consumed so it isn't applied again."""
     try:
         supabase \
+            .schema("reports") \
             .table("report_schedule_overrides") \
             .update({"used_at": datetime.now(timezone.utc).isoformat()}) \
             .eq("id", override_id) \
