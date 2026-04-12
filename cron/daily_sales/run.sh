@@ -1,4 +1,5 @@
 #!/bin/sh
 
-echo "Running daily sales report..."
-python /app/scripts/daily_sales_report.py
+echo "Enqueuing daily sales report job..."
+python /app/cron/daily_sales/enqueue_job.py
+echo "Done."
