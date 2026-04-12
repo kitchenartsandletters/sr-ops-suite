@@ -36,6 +36,11 @@ BLACKLISTED_PRODUCT_IDS = {
     "gid://shopify/Product/6604620202117",
     "gid://shopify/Product/6589468967045",
     "gid://shopify/Product/6830824489093",
+    "gid://shopify/Product/6621878386821",
+    "gid://shopify/Product/6621879304325",
+    "gid://shopify/Product/6621878812805",
+    "gid://shopify/Product/6621879533701",
+    "gid://shopify/Product/6621879042181",
 }
 
 
