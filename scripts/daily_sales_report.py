@@ -69,7 +69,7 @@ def prepare_mailtrap_attachments(filepaths):
     return attachments
 
 
-def send_mailtrap_email(subject, html_body, attachments=None):
+def send_mailtrap_email(subject, html_body, attachments=None, recipients=None):
     validate_env_for_mailtrap()
     url = "https://send.api.mailtrap.io/api/send"
     token = os.getenv("MAILTRAP_API_TOKEN")
@@ -81,7 +81,10 @@ def send_mailtrap_email(subject, html_body, attachments=None):
         "Content-Type": "application/json",
     }
 
-    to_addresses = [{"email": r.strip()} for r in recipient_list.split(",") if r.strip()]
+    if recipients:
+          to_addresses = [{"email": r} for r in recipients if r.strip()]
+    else:
+           to_addresses = [{"email": r.strip()} for r in recipient_list.split(",") if r.strip()]
 
     payload = {
         "from": {"email": sender, "name": "Daily Sales Report"},

@@ -134,9 +134,10 @@ def run_daily_sales_report(
         is_manual        : bool                 True when triggered on-demand
     """
     parameters      = parameters or {}
-    delivery_method = parameters.get("delivery_method", "email")
-    formats         = parameters.get("formats", ["pdf", "csv"])
-    is_manual       = bool(parameters.get("is_manual", False))
+    delivery_method    = parameters.get("delivery_method", "email")
+    formats            = parameters.get("formats", ["pdf", "csv"])
+    is_manual          = bool(parameters.get("is_manual", False))
+    recipient_override = parameters.get("recipients")  # list of email strings or None
     include_table_data = delivery_method == "table"
 
     tz_et = ZoneInfo("America/New_York")
@@ -265,7 +266,7 @@ def run_daily_sales_report(
         if pdf_written:
             attachment_paths.append(pdf_path)
         attachments = prepare_mailtrap_attachments(attachment_paths)
-        send_mailtrap_email(subject, html_body, attachments)
+        send_mailtrap_email(subject, html_body, attachments, recipients=recipient_override or None)
         email_sent = True
         logging.info(f"[service] Email sent: {subject}")
 
