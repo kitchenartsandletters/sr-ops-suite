@@ -81,7 +81,6 @@ def get_calendar_overrides(year: int) -> tuple[set[date], set[date]]:
     try:
         resp = (
             supabase
-            .schema("reports")
             .table("business_calendar_overrides")
             .select("date, override_type")
             .eq("year", year)
