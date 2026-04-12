@@ -40,56 +40,49 @@ load_dotenv()
 def execute_daily_sales(parameters: dict):
     """
     Dispatch wrapper for daily sales report.
-    Computes ET window using business_calendar for exact CLI parity.
+    Computes ET window using business_calendar for exact CLI parity,
+    then delegates to run_daily_sales_report which checks for schedule
+    overrides before using the computed window.
     """
-
-    tz_et = ZoneInfo("America/New_York")
-
+    tz_et    = ZoneInfo("America/New_York")
+    today_et = datetime.now(tz_et)
+ 
     start_date_str = parameters.get("start_date")
-    end_date_str = parameters.get("end_date")
-
-    # If explicit date range passed (manual run)
+    end_date_str   = parameters.get("end_date")
+ 
     if start_date_str and end_date_str:
+        # On-demand run with explicit date range from the dashboard
         start_date = datetime.fromisoformat(start_date_str).date()
-        end_date = datetime.fromisoformat(end_date_str).date()
+        end_date   = datetime.fromisoformat(end_date_str).date()
+        start_et   = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
+        end_et     = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59, tzinfo=tz_et)
+        parameters = {**parameters, "is_manual": True}
+ 
     else:
-        # Default CLI behavior: previous business window
-        today_et = datetime.now(tz_et)
-
+        # Automated run
         if not is_business_day(today_et.date()):
             logging.info(
                 f"[worker] {today_et.date()} is not a business day — skipping daily_sales job."
             )
             return {"skipped": True, "reason": "non_business_day"}
-
+ 
         start_date, _ = get_reporting_window(today_et.date())
-        end_date = today_et.date()
-
-    start_et = datetime(
-        start_date.year, start_date.month, start_date.day,
-        10, 0, 0, tzinfo=tz_et
-    )
-
-    end_et = datetime(
-        end_date.year, end_date.month, end_date.day,
-        9, 59, 59, tzinfo=tz_et
-    )
-
-    logging.info(
-        f"[worker] Daily sales ET window: "
-        f"{start_et.isoformat()} → {end_et.isoformat()}"
-    )
-
-    result = run_daily_sales_report(
+        end_date      = today_et.date()
+        start_et      = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
+        end_et        = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59, tzinfo=tz_et)
+        # Inject today as scheduled_date so service can look up the correct override row
+        parameters    = {**parameters, "scheduled_date": today_et.date().isoformat(), "is_manual": False}
+ 
+    logging.info(f"[worker] Daily sales ET window: {start_et.isoformat()} → {end_et.isoformat()}")
+ 
+    return run_daily_sales_report(
         start_et=start_et,
         end_et=end_et,
-        write_csv=True,
+        write_csv_file=True,
         write_pdf=True,
         send_email=True,
-        parameters=parameters,   # ← pass the full job parameters dict through
+        parameters=parameters,
     )
-
-    return result
 
 
 REPORT_EXECUTORS = {

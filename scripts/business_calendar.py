@@ -5,50 +5,45 @@ This module defines the business-day calendar for Kitchen Arts & Letters.
 
 IMPORTANT:
 - This module returns ONLY date boundaries (no times).
-- Time-of-day logic (10:00 AM start → 9:59:59 AM end) is applied in daily_sales_report.py.
+- Time-of-day logic (10:00 AM start → 9:59:59 AM end) is applied in daily_sales_service.py.
 - A *reporting window* always begins on the last open business day before today and ends yesterday.
 - If the store was closed for multiple consecutive days, those closed days are included in the window.
 
-Examples of reporting windows (date boundaries only):
-    • Fri after July 4 closure → covers Jul 3–Jul 4
-    • Mon after weekend → covers Sat–Sun
-    • Mon after two-day storm closure → covers Fri–Sun
-
-This file intentionally handles only calendar-day logic.
-daily_sales_report.py handles the 10:00 AM → 9:59:59 AM ET timestamp expansion.
+DB overrides (reports.business_calendar_overrides) always win over the hardcoded
+baseline sets when a row exists for a given date. Hardcoded data is used as the
+fallback for years with no DB rows.
 """
 
 from datetime import date, timedelta
 import logging
+from typing import Optional
+
+try:
+    from services.supabase_client import supabase
+    _SUPABASE_AVAILABLE = True
+except ImportError:
+    _SUPABASE_AVAILABLE = False
+    supabase = None
 
 # ----------------------------
-# 1. Static Calendar Data
+# 1. Hardcoded Baseline Data
 # ----------------------------
 
-# Regular open days: Mon–Sat
-# Regular closed day: Sunday
-# Exception: certain Sundays in December are OPEN
 SPECIAL_OPEN_SUNDAYS_2025 = {
     date(2025, 12, 7),
     date(2025, 12, 14),
     date(2025, 12, 21),
 }
 
-# Annual holiday closures
 HOLIDAY_CLOSURES_2025 = {
-    # Saturday before Memorial Day = 5/24/2025
     date(2025, 5, 24),
-    date(2025, 5, 26),   # Memorial Day
-    date(2025, 7, 4),    # Independence Day
-    date(2025, 9, 1),    # Labor Day
-    date(2025, 11, 28),  # Thanksgiving
-    date(2025, 12, 25),  # Christmas
-    date(2025, 12, 26),  # Boxing Day
+    date(2025, 5, 26),
+    date(2025, 7, 4),
+    date(2025, 9, 1),
+    date(2025, 11, 28),
+    date(2025, 12, 25),
+    date(2025, 12, 26),
 }
-
-# ----------------------------
-# 1b. Static Calendar Data — 2026
-# ----------------------------
 
 SPECIAL_OPEN_SUNDAYS_2026 = {
     date(2026, 12, 6),
@@ -57,98 +52,157 @@ SPECIAL_OPEN_SUNDAYS_2026 = {
 }
 
 HOLIDAY_CLOSURES_2026 = {
-    date(2026, 1, 1),     # New Year's Day
-    date(2026, 5, 23),    # Saturday before Memorial Day
-    date(2026, 5, 24),    # Memorial Day Sunday closure
-    date(2026, 7, 4),     # Independence Day
-    date(2026, 9, 7),     # Labor Day
-    date(2026, 11, 26),   # Thanksgiving
-    date(2026, 12, 25),   # Christmas
-    date(2026, 12, 26),   # Boxing Day
+    date(2026, 1, 1),
+    date(2026, 5, 23),
+    date(2026, 5, 24),
+    date(2026, 7, 4),
+    date(2026, 9, 7),
+    date(2026, 11, 26),
+    date(2026, 12, 25),
+    date(2026, 12, 26),
 }
 
+
 # ----------------------------
-# 2. Business Day Logic
+# 2. DB Override Loader
 # ----------------------------
 
-def is_business_day(d: date) -> bool:
+def get_calendar_overrides(year: int) -> tuple[set[date], set[date]]:
+    """
+    Fetch calendar overrides from Supabase for the given year.
+    Returns (holiday_closures, special_open_sundays) as sets of date objects.
+
+    DB rows always win over hardcoded baseline. If Supabase is unavailable,
+    falls back to hardcoded sets silently.
+    """
+    if not _SUPABASE_AVAILABLE or supabase is None:
+        return _baseline_for_year(year)
+
+    try:
+        resp = (
+            supabase
+            .schema("reports")
+            .table("business_calendar_overrides")
+            .select("date, override_type")
+            .eq("year", year)
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception as e:
+        logging.warning(f"[calendar] Failed to fetch overrides for {year}: {e}. Using baseline.")
+        return _baseline_for_year(year)
+
+    if not rows:
+        # No DB rows for this year — use hardcoded baseline as-is
+        return _baseline_for_year(year)
+
+    # Start from baseline, then apply DB overrides (DB always wins)
+    baseline_holidays, baseline_specials = _baseline_for_year(year)
+    holidays = set(baseline_holidays)
+    specials = set(baseline_specials)
+
+    for row in rows:
+        d = date.fromisoformat(row["date"])
+        if row["override_type"] == "holiday_closure":
+            holidays.add(d)
+            specials.discard(d)
+        elif row["override_type"] == "special_open_sunday":
+            specials.add(d)
+            holidays.discard(d)
+
+    return holidays, specials
+
+
+def _baseline_for_year(year: int) -> tuple[set[date], set[date]]:
+    """Return hardcoded baseline sets for the given year."""
+    if year == 2025:
+        return set(HOLIDAY_CLOSURES_2025), set(SPECIAL_OPEN_SUNDAYS_2025)
+    if year == 2026:
+        return set(HOLIDAY_CLOSURES_2026), set(SPECIAL_OPEN_SUNDAYS_2026)
+    # Future years: base schedule only (Mon–Sat open, Sun closed)
+    return set(), set()
+
+
+# ----------------------------
+# 3. Business Day Logic
+# ----------------------------
+
+def is_business_day(d: date, _holidays: Optional[set] = None, _specials: Optional[set] = None) -> bool:
     """
     Returns True if the store is open on date d.
-    Business days: Monday–Saturday, unless closed for holiday.
-    Sundays are closed EXCEPT special open Sundays.
+
+    If _holidays/_specials are provided (pre-fetched), uses those directly.
+    Otherwise fetches from DB (with hardcoded fallback) for d.year.
     """
+    if _holidays is None or _specials is None:
+        _holidays, _specials = get_calendar_overrides(d.year)
 
-    year = d.year
-
-    if year == 2025:
-        holiday_set = HOLIDAY_CLOSURES_2025
-        special_open_sundays = SPECIAL_OPEN_SUNDAYS_2025
-    elif year == 2026:
-        holiday_set = HOLIDAY_CLOSURES_2026
-        special_open_sundays = SPECIAL_OPEN_SUNDAYS_2026
-    else:
-        # Safe fallback for future years
-        holiday_set = set()
-        special_open_sundays = set()
-
-    # Holiday closures override everything
-    if d in holiday_set:
-        logging.debug(f"is_business_day({d}) -> False (holiday)")
+    if d in _holidays:
+        logging.debug(f"is_business_day({d}) -> False (holiday/closure)")
         return False
 
-    # Sunday logic
     if d.weekday() == 6:  # Sunday
-        result = d in special_open_sundays
+        result = d in _specials
         logging.debug(f"is_business_day({d}) -> {result} (sunday logic)")
         return result
 
-    # Normal business days: Mon (0) → Sat (5)
     result = d.weekday() in (0, 1, 2, 3, 4, 5)
     logging.debug(f"is_business_day({d}) -> {result} (weekday logic)")
     return result
 
 
-def find_last_open_day(today: date) -> date:
+def find_last_open_day(today: date, _holidays: Optional[set] = None, _specials: Optional[set] = None) -> date:
     """
     Starting from the day before 'today', walk backward until reaching
     an open business day.
+
+    Pass pre-fetched _holidays/_specials to avoid repeated DB calls.
     """
     cursor = today - timedelta(days=1)
     logging.debug(f"find_last_open_day start: today={today}, cursor={cursor}")
 
-    while not is_business_day(cursor):
+    while True:
+        # Fetch overrides for cursor's year if year boundary crossed
+        h = _holidays
+        s = _specials
+        if h is None or s is None:
+            h, s = get_calendar_overrides(cursor.year)
+        if is_business_day(cursor, h, s):
+            break
         logging.debug(f"{cursor} is closed, stepping back")
         cursor -= timedelta(days=1)
 
-    logging.debug(f"find_last_open_day resolved last open: {cursor}")
+    logging.debug(f"find_last_open_day resolved: {cursor}")
     return cursor
 
 
 # ----------------------------
-# 3. Reporting Window Logic
+# 4. Reporting Window Logic
 # ----------------------------
 
-def get_reporting_window(today: date):
+def get_reporting_window(today: date) -> tuple[date, date]:
     """
     Returns (start_date, end_date) for the report.
 
+    Fetches DB overrides once for today.year (and yesterday.year if crossing
+    a year boundary) to avoid repeated Supabase calls per iteration.
+
     Start = last open business day
     End   = yesterday
-
-    If yesterday is closed:
-        include all closed days up to last open day.
     """
     logging.debug(f"get_reporting_window called for today={today}")
     yesterday = today - timedelta(days=1)
 
-    # Find last open business day before 'today'
-    last_open = find_last_open_day(today)
+    # Pre-fetch overrides for the relevant year(s)
+    holidays, specials = get_calendar_overrides(today.year)
+    if yesterday.year != today.year:
+        h2, s2 = get_calendar_overrides(yesterday.year)
+        holidays = holidays | h2
+        specials = specials | s2
 
-    # The window always starts on the last open business day…
+    last_open  = find_last_open_day(today, holidays, specials)
     start_date = last_open
+    end_date   = yesterday
 
-    # …and always ends yesterday (closed or not).
-    end_date = yesterday
-
-    logging.debug(f"Reporting window raw: {start_date} -> {end_date}")
+    logging.debug(f"Reporting window: {start_date} -> {end_date}")
     return start_date, end_date
