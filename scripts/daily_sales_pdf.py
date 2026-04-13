@@ -289,6 +289,7 @@ def generate_daily_sales_pdf(sections, output_path, report_title, window_text):
         ("Backorders", sections.get("backorders", [])),
         ("Out of Stock", sections.get("out_of_stock", [])),
         ("Preorders", sections.get("preorders", [])),
+        ("Out of Print", sections.get("op_sales", [])),
     ]
 
     for title, rows in section_specs:

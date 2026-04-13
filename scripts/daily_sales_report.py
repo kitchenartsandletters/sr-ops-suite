@@ -372,6 +372,7 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
     preorder_sales = {}
     backorder_sales = {}
     oos_sales = {}
+    op_sales = {}
  
     # When called from daily_sales_service.py, exclusion_ids comes from the DB.
     # When called from the CLI (main()), exclusion_ids is None — fall back to
@@ -385,6 +386,33 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
             item = edge["node"]
             variant = item.get("variant")
             if variant is None:
+                # Custom POS or draft order line item — no product record
+                custom_title = item.get("title", "")
+                if not custom_title or "cookbook club" in custom_title.lower():
+                    continue
+                qty = item["quantity"]
+                source = order.get("sourceName", "")
+                handle = (order.get("channel") or {}).get("handle", "")
+                is_online = (source == "web") or (handle == "online_store")
+                quantity_target = "ol_sold" if is_online else "pos_sold"
+                key = f"custom::{custom_title}"
+                is_op = custom_title.upper().startswith("OP:")
+                target = op_sales if is_op else main_sales
+                if key not in target:
+                    target[key] = {
+                        "title": custom_title,
+                        "vendor": "",
+                        "author": "",
+                        "collections": [],
+                        "isbn": "NO BARCODE",
+                        "available": None,
+                        "incoming": 0,
+                        "price": None,
+                        "ol_sold": 0,
+                        "pos_sold": 0,
+                        "attributes": "",
+                    }
+                target[key][quantity_target] += qty
                 continue
  
             attrs = {a["key"]: a["value"] for a in item.get("customAttributes", [])}
@@ -402,6 +430,7 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
             vendor = pdetail.get("vendor", "")
  
             is_preorder = "Preorder" in collections
+            is_op = title.upper().startswith("OP:")
  
             if pid in effective_exclusions or "cookbook club" in title.lower():
                 continue
@@ -421,18 +450,20 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
             is_online = (source == "web") or (handle == "online_store")
             quantity_target = "ol_sold" if is_online else "pos_sold"
  
-            if is_preorder:
-                target = preorder_sales
+            if is_op:
+                 target = op_sales
+            elif is_preorder:
+                 target = preorder_sales
             else:
-                if available is not None:
-                    if available < 0:
-                        target = backorder_sales
-                    elif available == 0:
-                        target = oos_sales
-                    else:
-                        target = main_sales
-                else:
-                    target = main_sales
+                 if available is not None:
+                     if available < 0:
+                         target = backorder_sales
+                     elif available == 0:
+                         target = oos_sales
+                     else:
+                         target = main_sales
+                 else:
+                     target = main_sales
  
             if pid not in target:
                 target[pid] = {
@@ -463,7 +494,7 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
  
             target[pid][quantity_target] += item["quantity"]
  
-    return main_sales, backorder_sales, oos_sales, preorder_sales
+    return main_sales, backorder_sales, oos_sales, preorder_sales, op_sales
 
 
 # -----------------------------
@@ -484,7 +515,7 @@ def sort_title_key(title: str) -> str:
 
 
 def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, dry_run: bool):
-    main_sales, backorder_sales, oos_sales, preorder_sales = data
+    main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = data
 
     if dry_run:
         logging.info("Dry run: would write %s", filename)
@@ -585,6 +616,25 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                     "",
                 ])
 
+        if op_sales:
+             writer.writerow([])
+             writer.writerow(["OUT OF PRINT"])
+             writer.writerow([])
+             writer.writerow(header)
+             for _, info in sorted(op_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
+                 writer.writerow([
+                     info["title"],
+                     info["author"],
+                     info.get("vendor", ""),
+                     info["isbn"],
+                     info.get("price", ""),
+                     ", ".join(info["collections"]),
+                     info["available"] if info["available"] is not None else "",
+                     info.get("incoming", 0),
+                     info["attributes"],
+                     "",
+               ])
+
     logging.info("CSV written: %s", filename)
     return filename
 
@@ -647,9 +697,9 @@ def main():
     product_ids = extract_product_ids(orders)
     product_details = fetch_product_details(client, product_ids)
 
-    main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(
-        orders,
-        product_details,
+    main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = aggregate_products(
+         orders,
+         product_details,
     )
 
     filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
@@ -657,7 +707,7 @@ def main():
 
     if not args.dry_run:
         write_csv(
-            (main_sales, backorder_sales, oos_sales, preorder_sales),
+            (main_sales, backorder_sales, oos_sales, preorder_sales, op_sales),
             filename,
             start_et,
             end_et,
@@ -674,6 +724,7 @@ def main():
             "backorders": list(backorder_sales.values()),
             "out_of_stock": list(oos_sales.values()),
             "preorders": list(preorder_sales.values()),
+            "op_salse": list(op_sales.values()),
         }
 
         report_title = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"

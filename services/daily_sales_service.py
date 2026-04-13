@@ -255,7 +255,7 @@ def run_daily_sales_report(
     product_ids     = extract_product_ids(orders)
     product_details = fetch_product_details(client, product_ids)
 
-    main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(
+    main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = aggregate_products(
         orders, product_details, exclusion_ids=exclusion_ids
     )
 
@@ -264,6 +264,7 @@ def run_daily_sales_report(
         "backorders":   backorder_sales,
         "out_of_stock": oos_sales,
         "preorders":    preorder_sales,
+        "op_sales":     op_sales,
     }
     row_counts = {k: len(v) for k, v in sections_raw.items()}
 
@@ -271,7 +272,7 @@ def run_daily_sales_report(
     csv_written = False
     if write_csv_file and "csv" in formats:
         write_csv(
-            (main_sales, backorder_sales, oos_sales, preorder_sales),
+            (main_sales, backorder_sales, oos_sales, preorder_sales, op_sales),
             filename, start_et, end_et, dry_run=False,
         )
         csv_written = True
