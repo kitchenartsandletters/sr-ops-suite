@@ -392,6 +392,18 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
             product = variant["product"]
             pid = product["id"]
             base_title = product["title"]
+
+            # ── TEMPORARY DEBUG ───────────────────────────────────────────────
+            TARGET_IDS = {"6621879304325", "6621878386821"}
+            if any(t in pid for t in TARGET_IDS):
+                logging.info(f"[DEBUG] Found target: pid={pid}")
+                logging.info(f"[DEBUG]   in effective_exclusions: {pid in effective_exclusions}")
+                logging.info(f"[DEBUG]   variant={variant}")
+                pdetail = product_details.get(pid, {})
+                logging.info(f"[DEBUG]   pdetail={pdetail}")
+                logging.info(f"[DEBUG]   title from pdetail={pdetail.get('title', product['title'])}")
+                logging.info(f"[DEBUG]   collections={pdetail.get('collections', [])}")
+            # ── END DEBUG ─────────────────────────────────────────────────────
  
             pdetail = product_details.get(pid, {})
             title = pdetail.get("title", base_title)
