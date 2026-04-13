@@ -113,6 +113,26 @@ def _mark_override_used(override_id: str) -> None:
         logging.warning(f"[service] Failed to mark override {override_id} as used: {e}")
 
 
+
+def _fetch_exclusion_ids() -> set[str]:
+    """
+    Fetch product IDs to exclude from the report from Supabase.
+    Falls back to empty set on failure so report still runs.
+    """
+    try:
+        resp = (
+            supabase
+            .schema("reports")
+            .table("report_product_exclusions")
+            .select("product_id")
+            .execute()
+        )
+        return {row["product_id"] for row in (resp.data or [])}
+    except Exception as e:
+        logging.warning(f"[service] Failed to fetch exclusions, proceeding without: {e}")
+        return set()
+
+
 def run_daily_sales_report(
     start_et: datetime,
     end_et: datetime,
@@ -138,6 +158,7 @@ def run_daily_sales_report(
     formats            = parameters.get("formats", ["pdf", "csv"])
     is_manual          = bool(parameters.get("is_manual", False))
     recipient_override = parameters.get("recipients")  # list of email strings or None
+    ignore_exclusions  = bool(parameters.get("ignore_exclusions", False))
     include_table_data = delivery_method == "table"
 
     tz_et = ZoneInfo("America/New_York")
@@ -223,12 +244,19 @@ def run_daily_sales_report(
     # ── Fetch + aggregate ─────────────────────────────────────────────────────
     client = ShopifyClient()
 
+    # Fetch exclusion list from DB unless bypassed
+    exclusion_ids = set() if ignore_exclusions else _fetch_exclusion_ids()
+    if exclusion_ids:
+        logging.info(f"[service] Excluding {len(exclusion_ids)} products from report.")
+    if ignore_exclusions:
+        logging.info("[service] Exclusion list bypassed for this run.")
+
     orders          = fetch_24h_orders(client, start_et, end_et)
     product_ids     = extract_product_ids(orders)
     product_details = fetch_product_details(client, product_ids)
 
     main_sales, backorder_sales, oos_sales, preorder_sales = aggregate_products(
-        orders, product_details
+        orders, product_details, exclusion_ids=exclusion_ids
     )
 
     sections_raw = {

@@ -367,27 +367,32 @@ def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
 # Aggregation
 # -----------------------------
 
-def aggregate_products(orders, product_details: dict):
+def aggregate_products(orders, product_details: dict, exclusion_ids: set | None = None):
     main_sales = {}
     preorder_sales = {}
     backorder_sales = {}
     oos_sales = {}
-
+ 
+    # When called from daily_sales_service.py, exclusion_ids comes from the DB.
+    # When called from the CLI (main()), exclusion_ids is None — fall back to
+    # the hardcoded BLACKLISTED_PRODUCT_IDS for backwards compatibility.
+    effective_exclusions = exclusion_ids if exclusion_ids is not None else BLACKLISTED_PRODUCT_IDS
+ 
     for order in orders:
         li_edges = order["lineItems"]["edges"]
-
+ 
         for edge in li_edges:
             item = edge["node"]
             variant = item.get("variant")
             if variant is None:
                 continue
-
+ 
             attrs = {a["key"]: a["value"] for a in item.get("customAttributes", [])}
-
+ 
             product = variant["product"]
             pid = product["id"]
             base_title = product["title"]
-
+ 
             pdetail = product_details.get(pid, {})
             title = pdetail.get("title", base_title)
             collections = pdetail.get("collections", [])
@@ -395,27 +400,27 @@ def aggregate_products(orders, product_details: dict):
             incoming = pdetail.get("incoming", 0)
             price = pdetail.get("price")
             vendor = pdetail.get("vendor", "")
-
+ 
             is_preorder = "Preorder" in collections
-
-            if pid in BLACKLISTED_PRODUCT_IDS or "cookbook club" in title.lower():
+ 
+            if pid in effective_exclusions or "cookbook club" in title.lower():
                 continue
-
+ 
             label_parts = []
             if attrs.get("_signed") == "true":
                 label_parts.append("Signed")
             if attrs.get("_bookplate") == "true":
                 label_parts.append("Bookplate")
             attr_label = ", ".join(label_parts)
-
+ 
             sku = variant.get("sku")
             barcode = variant.get("barcode")
-
+ 
             source = order.get("sourceName", "")
             handle = (order.get("channel") or {}).get("handle", "")
             is_online = (source == "web") or (handle == "online_store")
             quantity_target = "ol_sold" if is_online else "pos_sold"
-
+ 
             if is_preorder:
                 target = preorder_sales
             else:
@@ -428,7 +433,7 @@ def aggregate_products(orders, product_details: dict):
                         target = main_sales
                 else:
                     target = main_sales
-
+ 
             if pid not in target:
                 target[pid] = {
                     "title": title,
@@ -455,9 +460,9 @@ def aggregate_products(orders, product_details: dict):
                     bucket["author"] = sku
                 if barcode:
                     bucket["isbn"] = barcode
-
+ 
             target[pid][quantity_target] += item["quantity"]
-
+ 
     return main_sales, backorder_sales, oos_sales, preorder_sales
 
 
