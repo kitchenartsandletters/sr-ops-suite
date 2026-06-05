@@ -50,31 +50,7 @@ from daily_sales_pdf import generate_daily_sales_pdf
 from business_calendar import get_reporting_window
 from shopify_client import ShopifyClient
 from services.supabase_client import supabase
-
-def _with_retry(fn, *args, max_attempts=3, retry_delay=10, **kwargs):
-    """
-    Call fn(*args, **kwargs) with up to max_attempts attempts.
-    Retries on transient errors only. Raises immediately on 404/Not Found.
-    """
-    last_exc = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            return fn(*args, **kwargs)
-        except RuntimeError as e:
-            msg = str(e)
-            if "Not Found" in msg or "404" in msg:
-                raise  # Hard config error — don't retry
-            last_exc = e
-            if attempt < max_attempts:
-                logging.warning(
-                    f"[service] Transient Shopify error (attempt {attempt}/{max_attempts}): {e}. "
-                    f"Retrying in {retry_delay}s..."
-                )
-                time.sleep(retry_delay)
-            else:
-                logging.error(f"[service] All {max_attempts} attempts failed: {e}")
-    raise last_exc
-
+from services.utils import _with_retry
 
 def _bucket_to_dict(info: dict) -> dict:
     return {

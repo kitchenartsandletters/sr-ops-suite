@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from lop_unfulfilled_report import ShopifyClient
 from business_calendar import get_reporting_window, is_business_day
-from services.daily_sales_service import _with_retry
+from services.utils import _with_retry
 
 
 # Hardcoded blacklist of product IDs
