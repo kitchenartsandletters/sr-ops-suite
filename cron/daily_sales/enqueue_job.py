@@ -45,6 +45,34 @@ except ImportError as e:
     logging.error(f"Failed to import supabase client: {e}")
     sys.exit(1)
 
+def _send_enqueue_alert(error: str):
+    """Best-effort alert when the cron fails to insert a job."""
+    try:
+        import requests as req
+        token     = os.getenv("MAILTRAP_API_TOKEN")
+        sender    = os.getenv("EMAIL_SENDER")
+        recipients_raw = os.getenv("EMAIL_RECIPIENTS", "")
+        if not token or not sender or not recipients_raw:
+            return
+        to_addresses = [{"email": r.strip()} for r in recipients_raw.split(",") if r.strip()]
+        req.post(
+            "https://send.api.mailtrap.io/api/send",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "from":    {"email": sender, "name": "KAL Report Worker"},
+                "to":      to_addresses,
+                "subject": "⚠️ Daily sales report failed to enqueue",
+                "text": (
+                    f"The daily sales report cron failed to insert a job into the queue.\n\n"
+                    f"Error: {error}\n\n"
+                    f"The report will NOT run today. Manual intervention required.\n"
+                    f"https://admin.kitchenartsandletters.com/reports\n"
+                ),
+            },
+            timeout=15,
+        )
+    except Exception:
+        pass  # Never let alert failure prevent the exit code
 
 def enqueue():
     try:
@@ -71,6 +99,7 @@ def enqueue():
 
     except Exception as e:
         logging.exception(f"Failed to enqueue daily sales job: {e}")
+        _send_enqueue_failure_alert(str(e))
         sys.exit(1)
 
 

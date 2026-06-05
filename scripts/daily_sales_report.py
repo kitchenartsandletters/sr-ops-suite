@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from lop_unfulfilled_report import ShopifyClient
 from business_calendar import get_reporting_window, is_business_day
+from services.daily_sales_service import _with_retry
 
 
 # Hardcoded blacklist of product IDs
@@ -692,10 +693,10 @@ def main():
 
     now_et = today_et
 
-    orders = fetch_24h_orders(client, start_et, end_et)
+    orders = _with_retry(fetch_24h_orders, client, start_et, end_et)
 
     product_ids = extract_product_ids(orders)
-    product_details = fetch_product_details(client, product_ids)
+    product_details = _with_retry(fetch_product_details, client, product_ids)
 
     main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = aggregate_products(
          orders,

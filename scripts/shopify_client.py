@@ -19,6 +19,24 @@ from typing import Any, Dict, Optional
 
 import requests
 
+VALIDATE_QUERY = """{ shop { name } }"""
+ 
+def validate_connection(self):
+    """
+    Call once at worker startup to confirm the API version is live.
+    Raises RuntimeError with a clear message if the version is sunset.
+    """
+    try:
+        self.graphql(VALIDATE_QUERY)
+        logging.info(f"[shopify] API connection validated: {self.base_url}")
+    except RuntimeError as e:
+        if "Not Found" in str(e) or "404" in str(e):
+            raise RuntimeError(
+                f"Shopify API version may be sunset. "
+                f"Check SHOPIFY_API_VERSION env var. URL: {self.base_url}"
+            )
+        raise
+
 
 class ShopifyClient:
     def __init__(self) -> None:

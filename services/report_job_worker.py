@@ -32,6 +32,50 @@ POLL_INTERVAL_SECONDS = int(os.getenv("REPORT_WORKER_POLL_INTERVAL", "5"))
 
 load_dotenv()
 
+# ─────────────────────────────────────────────────────────────
+# Utility Functions
+# ─────────────────────────────────────────────────────────────
+
+def send_failure_alert(job_id: str, report_id: str, error: str):
+    """
+    Send a plain-text failure alert to EMAIL_RECIPIENTS via Mailtrap.
+    Best-effort — if this fails it logs and continues, never raises.
+    """
+    try:
+        import requests as req
+        token     = os.getenv("MAILTRAP_API_TOKEN")
+        sender    = os.getenv("EMAIL_SENDER")
+        recipients_raw = os.getenv("EMAIL_RECIPIENTS", "")
+        if not token or not sender or not recipients_raw:
+            logging.warning("[worker] Cannot send failure alert — Mailtrap env vars missing.")
+            return
+ 
+        to_addresses = [{"email": r.strip()} for r in recipients_raw.split(",") if r.strip()]
+        payload = {
+            "from":    {"email": sender, "name": "KAL Report Worker"},
+            "to":      to_addresses,
+            "subject": f"⚠️ Report job failed: {report_id}",
+            "text": (
+                f"A report job failed and requires attention.\n\n"
+                f"Job ID:    {job_id}\n"
+                f"Report:    {report_id}\n"
+                f"Error:     {error}\n\n"
+                f"Check the admin dashboard for details:\n"
+                f"https://admin.kitchenartsandletters.com/reports\n"
+            ),
+        }
+        resp = req.post(
+            "https://send.api.mailtrap.io/api/send",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            logging.info(f"[worker] Failure alert sent for job {job_id}.")
+        else:
+            logging.warning(f"[worker] Failure alert send failed: {resp.status_code} {resp.text}")
+    except Exception as e:
+        logging.warning(f"[worker] Could not send failure alert: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # Report Dispatcher
@@ -171,8 +215,10 @@ async def process_job(job: dict):
         logging.info(f"[worker] Job {job_id} completed successfully.")
 
     except Exception as e:
-        logging.exception(f"[worker] Job {job_id} failed.")
-        update_job(job_id, status="failed", error=str(e))
+           logging.exception(f"[worker] Job {job_id} failed.")
+           update_job(job_id, status="failed", error=str(e))
+           send_failure_alert(job_id, report_id, str(e))
+ 
 
 
 async def worker_loop():
