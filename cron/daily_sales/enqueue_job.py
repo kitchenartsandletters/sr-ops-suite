@@ -8,7 +8,9 @@ and executes via daily_sales_service.py.
 """
 
 import logging
+import os
 import sys
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -75,32 +77,34 @@ def _send_enqueue_alert(error: str):
         pass  # Never let alert failure prevent the exit code
 
 def enqueue():
-    try:
-        resp = (
-            supabase
-            .schema("reports")
-            .table("report_jobs")
-            .insert({
-                "report_id":  "daily_sales",
-                "status":     "queued",
-                "parameters": {"is_automated": True},
-            })
-            .execute()
-        )
-
-        if not resp.data:
-            logging.error("Insert returned no data — job may not have been created.")
-            sys.exit(1)
-
-        job = resp.data[0]
-        logging.info(
-            f"✅ Daily sales job enqueued: id={job['id']} status={job['status']}"
-        )
-
-    except Exception as e:
-        logging.exception(f"Failed to enqueue daily sales job: {e}")
-        _send_enqueue_failure_alert(str(e))
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = (
+                supabase
+                .schema("reports")
+                .table("report_jobs")
+                .insert({
+                    "report_id":  "daily_sales",
+                    "status":     "queued",
+                    "parameters": {"is_automated": True},
+                })
+                .execute()
+            )
+            if not resp.data:
+                logging.error("Insert returned no data.")
+                sys.exit(1)
+            job = resp.data[0]
+            logging.info(f"✅ Daily sales job enqueued: id={job['id']} status={job['status']}")
+            return
+        except Exception as e:
+            logging.warning(f"Attempt {attempt}/{max_attempts} failed: {e}")
+            if attempt < max_attempts:
+                time.sleep(10)
+            else:
+                logging.error(f"All {max_attempts} attempts failed.")
+                _send_enqueue_alert(str(e))
+                sys.exit(1)
 
 
 if __name__ == "__main__":
