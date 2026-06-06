@@ -20,36 +20,19 @@ from typing import Any, Dict, Optional
 import requests
 
 VALIDATE_QUERY = """{ shop { name } }"""
- 
-def validate_connection(self):
-    """
-    Call once at worker startup to confirm the API version is live.
-    Raises RuntimeError with a clear message if the version is sunset.
-    """
-    try:
-        self.graphql(VALIDATE_QUERY)
-        logging.info(f"[shopify] API connection validated: {self.base_url}")
-    except RuntimeError as e:
-        if "Not Found" in str(e) or "404" in str(e):
-            raise RuntimeError(
-                f"Shopify API version may be sunset. "
-                f"Check SHOPIFY_API_VERSION env var. URL: {self.base_url}"
-            )
-        raise
 
 
 class ShopifyClient:
     def __init__(self) -> None:
         shop_url    = os.getenv("SHOP_URL")
         access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
-        api_version  = os.getenv("SHOPIFY_API_VERSION", "2025-01")
+        api_version  = os.getenv("SHOPIFY_API_VERSION", "2025-10")
 
         if not shop_url or not access_token:
             raise RuntimeError(
                 "SHOP_URL and SHOPIFY_ACCESS_TOKEN must be set in environment variables."
             )
 
-        # Accept bare domain or full https:// URL
         if shop_url.startswith("http://") or shop_url.startswith("https://"):
             base_domain = shop_url.split("://", 1)[1].rstrip("/")
         else:
@@ -61,6 +44,18 @@ class ShopifyClient:
             "X-Shopify-Access-Token": access_token,
             "Content-Type": "application/json",
         })
+
+    def validate_connection(self):
+        try:
+            self.graphql(VALIDATE_QUERY)
+            logging.info(f"[shopify] API connection validated: {self.base_url}")
+        except RuntimeError as e:
+            if "Not Found" in str(e) or "404" in str(e):
+                raise RuntimeError(
+                    f"Shopify API version may be sunset. "
+                    f"Check SHOPIFY_API_VERSION env var. URL: {self.base_url}"
+                )
+            raise
 
     def graphql(
         self,
