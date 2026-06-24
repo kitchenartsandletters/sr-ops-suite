@@ -1,6 +1,6 @@
 #!/bin/sh
 
-echo "Starting Report Job Worker..."
-
+echo "Enqueuing NYFS daily sales report job..."
 export PYTHONPATH=/app
-python -m services.report_job_worker
+python /app/cron/daily_sales_nyfs/enqueue_job.py
+echo "Done."
