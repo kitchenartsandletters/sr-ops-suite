@@ -21,7 +21,14 @@ from services.supabase_client import supabase
 
 # Import report executors
 from services.daily_sales_service import run_daily_sales_report
-from scripts.business_calendar import get_reporting_window, is_business_day
+from scripts.business_calendar import (
+    get_reporting_window,
+    is_business_day,
+    get_open_time,
+    get_close_time,
+    LOCATION_KAL,
+    LOCATION_NYFS,
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -29,6 +36,9 @@ from scripts.business_calendar import get_reporting_window, is_business_day
 # ─────────────────────────────────────────────────────────────
 
 POLL_INTERVAL_SECONDS = int(os.getenv("REPORT_WORKER_POLL_INTERVAL", "5"))
+KAL_LOCATION_ID  = os.getenv("KAL_LOCATION_ID",  "gid://shopify/Location/40052293765")
+NYFS_LOCATION_ID = os.getenv("NYFS_LOCATION_ID", "gid://shopify/Location/67668738181")
+
 
 load_dotenv()
 
@@ -81,12 +91,11 @@ def send_failure_alert(job_id: str, report_id: str, error: str):
 # Report Dispatcher
 # ─────────────────────────────────────────────────────────────
 
-def execute_daily_sales(parameters: dict):
+def _execute_daily_sales_for_location(parameters: dict, location_id: str, cal_location: str):
     """
-    Dispatch wrapper for daily sales report.
-    Computes ET window using business_calendar for exact CLI parity,
-    then delegates to run_daily_sales_report which checks for schedule
-    overrides before using the computed window.
+    Shared executor logic for both KAL and NYFS daily sales reports.
+    cal_location: 'kal' or 'nyfs' — used for business calendar lookups.
+    location_id:  Shopify location GID — used for order and inventory filtering.
     """
     tz_et    = ZoneInfo("America/New_York")
     today_et = datetime.now(tz_et)
@@ -94,30 +103,42 @@ def execute_daily_sales(parameters: dict):
     start_date_str = parameters.get("start_date")
     end_date_str   = parameters.get("end_date")
  
+    open_h,  open_m  = get_open_time(cal_location)
+    close_h, close_m = get_close_time(cal_location)
+ 
     if start_date_str and end_date_str:
-        # On-demand run with explicit date range from the dashboard
         start_date = datetime.fromisoformat(start_date_str).date()
         end_date   = datetime.fromisoformat(end_date_str).date()
-        start_et   = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
-        end_et     = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59, tzinfo=tz_et)
         parameters = {**parameters, "is_manual": True}
  
     else:
-        # Automated run
-        if not is_business_day(today_et.date()):
+        if not is_business_day(today_et.date(), cal_location):
             logging.info(
-                f"[worker] {today_et.date()} is not a business day — skipping daily_sales job."
+                f"[worker] {today_et.date()} is not a business day for {cal_location} — skipping."
             )
-            return {"skipped": True, "reason": "non_business_day"}
+            return {"skipped": True, "reason": "non_business_day", "location": cal_location}
  
-        start_date, _ = get_reporting_window(today_et.date())
+        start_date, _ = get_reporting_window(today_et.date(), cal_location)
         end_date      = today_et.date()
-        start_et      = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0, tzinfo=tz_et)
-        end_et        = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59, tzinfo=tz_et)
-        # Inject today as scheduled_date so service can look up the correct override row
-        parameters    = {**parameters, "scheduled_date": today_et.date().isoformat(), "is_manual": False}
+        parameters    = {
+            **parameters,
+            "scheduled_date": today_et.date().isoformat(),
+            "is_manual": False,
+        }
  
-    logging.info(f"[worker] Daily sales ET window: {start_et.isoformat()} → {end_et.isoformat()}")
+    start_et = datetime(
+        start_date.year, start_date.month, start_date.day,
+        open_h, open_m, 0, tzinfo=tz_et
+    )
+    end_et = datetime(
+        end_date.year, end_date.month, end_date.day,
+        close_h, close_m, 59, tzinfo=tz_et
+    )
+ 
+    logging.info(
+        f"[worker] {cal_location.upper()} daily sales ET window: "
+        f"{start_et.isoformat()} → {end_et.isoformat()}"
+    )
  
     return run_daily_sales_report(
         start_et=start_et,
@@ -125,15 +146,34 @@ def execute_daily_sales(parameters: dict):
         write_csv_file=True,
         write_pdf=True,
         send_email=True,
-        parameters=parameters,
+        parameters={
+            **parameters,
+            "location_id":     location_id,
+            "cal_location":    cal_location,
+        },
     )
-
-
+ 
+ 
+def execute_daily_sales_kal(parameters: dict):
+    return _execute_daily_sales_for_location(
+        parameters,
+        location_id=KAL_LOCATION_ID,
+        cal_location=LOCATION_KAL,
+    )
+ 
+ 
+def execute_daily_sales_nyfs(parameters: dict):
+    return _execute_daily_sales_for_location(
+        parameters,
+        location_id=NYFS_LOCATION_ID,
+        cal_location=LOCATION_NYFS,
+    )
+ 
+ 
+# Replace REPORT_EXECUTORS with:
 REPORT_EXECUTORS = {
-    "daily_sales": execute_daily_sales,
-    # Future:
-    # "weekly_maintenance": execute_weekly_maintenance,
-    # "lop_unfulfilled": execute_lop_unfulfilled,
+    "daily_sales_kal":  execute_daily_sales_kal,
+    "daily_sales_nyfs": execute_daily_sales_nyfs,
 }
 
 

@@ -29,7 +29,7 @@ from business_calendar import get_reporting_window, is_business_day
 from services.utils import _with_retry
 
 
-# Hardcoded blacklist of product IDs
+# Hardcoded blacklist of product IDs (CLI fallback only — DB exclusions used by service)
 BLACKLISTED_PRODUCT_IDS = {
     "gid://shopify/Product/5238890889349",
     "gid://shopify/Product/6544636477573",
@@ -43,6 +43,9 @@ BLACKLISTED_PRODUCT_IDS = {
     "gid://shopify/Product/6621879533701",
     "gid://shopify/Product/6621879042181",
 }
+
+# KAL Lexington location ID (online orders always belong here)
+KAL_LOCATION_ID = "gid://shopify/Location/40052293765"
 
 
 # -----------------------------
@@ -88,9 +91,9 @@ def send_mailtrap_email(subject, html_body, attachments=None, recipients=None):
     }
 
     if recipients:
-          to_addresses = [{"email": r} for r in recipients if r.strip()]
+        to_addresses = [{"email": r} for r in recipients if r.strip()]
     else:
-           to_addresses = [{"email": r.strip()} for r in recipient_list.split(",") if r.strip()]
+        to_addresses = [{"email": r.strip()} for r in recipient_list.split(",") if r.strip()]
 
     payload = {
         "from": {"email": sender, "name": "Daily Sales Report"},
@@ -162,6 +165,9 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
         channel {
           handle
         }
+        physicalLocation {
+          id
+        }
         lineItems(first: 100) {
           edges {
             node {
@@ -222,7 +228,10 @@ query ProductDetails($id: ID!) {
             inventoryLevels(first: 5) {
               edges {
                 node {
-                  quantities(names: ["incoming"]) {
+                  location {
+                    id
+                  }
+                  quantities(names: ["available", "incoming"]) {
                     name
                     quantity
                   }
@@ -316,7 +325,11 @@ def extract_product_ids(orders) -> set[str]:
     return product_ids
 
 
-def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
+def fetch_product_details(
+    client: ShopifyClient,
+    product_ids: set[str],
+    location_id: str | None = None,
+) -> dict:
     details: dict[str, dict] = {}
 
     for pid in sorted(product_ids):
@@ -341,20 +354,29 @@ def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
             price = amount
 
         incoming_total = 0
+        available_at_location = None
+
         for v_edge in product.get("variants", {}).get("edges", []):
             v_node = v_edge.get("node") or {}
             inv_item = v_node.get("inventoryItem") or {}
             for lvl_edge in inv_item.get("inventoryLevels", {}).get("edges", []):
                 lvl_node = lvl_edge.get("node") or {}
-                for q in lvl_node.get("quantities") or []:
-                    if q.get("name") == "incoming":
-                        qty_val = q.get("quantity") or 0
-                        incoming_total += qty_val
+                loc_id  = (lvl_node.get("location") or {}).get("id")
+                qty_map = {q["name"]: q["quantity"] for q in (lvl_node.get("quantities") or [])}
+
+                # When location_id is provided, only count inventory at that location
+                if location_id and loc_id != location_id:
+                    continue
+
+                incoming_total += qty_map.get("incoming") or 0
+                avail = qty_map.get("available")
+                if avail is not None:
+                    available_at_location = (available_at_location or 0) + avail
 
         details[pid] = {
             "title": title,
             "vendor": product.get("vendor") or "",
-            "available": total_inv,
+            "available": available_at_location if location_id else total_inv,
             "collections": collections,
             "incoming": incoming_total,
             "price": price,
@@ -368,37 +390,54 @@ def fetch_product_details(client: ShopifyClient, product_ids: set[str]) -> dict:
 # Aggregation
 # -----------------------------
 
-def aggregate_products(orders, product_details: dict, exclusion_ids: set | None = None):
-    main_sales = {}
+def aggregate_products(
+    orders,
+    product_details: dict,
+    exclusion_ids: set | None = None,
+    location_id: str | None = None,
+):
+    main_sales     = {}
     preorder_sales = {}
     backorder_sales = {}
-    oos_sales = {}
-    op_sales = {}
- 
+    oos_sales      = {}
+    op_sales       = {}
+
     # When called from daily_sales_service.py, exclusion_ids comes from the DB.
     # When called from the CLI (main()), exclusion_ids is None — fall back to
     # the hardcoded BLACKLISTED_PRODUCT_IDS for backwards compatibility.
     effective_exclusions = exclusion_ids if exclusion_ids is not None else BLACKLISTED_PRODUCT_IDS
- 
+
     for order in orders:
         li_edges = order["lineItems"]["edges"]
- 
+
         for edge in li_edges:
-            item = edge["node"]
+            item    = edge["node"]
             variant = item.get("variant")
+
             if variant is None:
                 # Custom POS or draft order line item — no product record
                 custom_title = item.get("title", "")
                 if not custom_title or "cookbook club" in custom_title.lower():
                     continue
-                qty = item["quantity"]
-                source = order.get("sourceName", "")
-                handle = (order.get("channel") or {}).get("handle", "")
-                is_online = (source == "web") or (handle == "online_store")
-                quantity_target = "ol_sold" if is_online else "pos_sold"
-                key = f"custom::{custom_title}"
-                is_op = custom_title.upper().startswith("OP:")
-                target = op_sales if is_op else main_sales
+
+                # Location filter for custom items
+                if location_id:
+                    phys_loc     = (order.get("physicalLocation") or {}).get("id")
+                    is_online    = phys_loc is None
+                    if is_online and location_id != KAL_LOCATION_ID:
+                        continue
+                    if phys_loc and phys_loc != location_id:
+                        continue
+
+                qty            = item["quantity"]
+                source         = order.get("sourceName", "")
+                handle         = (order.get("channel") or {}).get("handle", "")
+                is_online_sale = (source == "web") or (handle == "online_store")
+                quantity_target = "ol_sold" if is_online_sale else "pos_sold"
+                key            = f"custom::{custom_title}"
+                is_op          = custom_title.upper().startswith("OP:")
+                target         = op_sales if is_op else main_sales
+
                 if key not in target:
                     target[key] = {
                         "title": custom_title,
@@ -415,57 +454,66 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
                     }
                 target[key][quantity_target] += qty
                 continue
- 
+
+            # Location filter for regular products
+            if location_id:
+                phys_loc  = (order.get("physicalLocation") or {}).get("id")
+                is_online = phys_loc is None
+                if is_online and location_id != KAL_LOCATION_ID:
+                    continue
+                if phys_loc and phys_loc != location_id:
+                    continue
+
             attrs = {a["key"]: a["value"] for a in item.get("customAttributes", [])}
- 
-            product = variant["product"]
-            pid = product["id"]
+
+            product    = variant["product"]
+            pid        = product["id"]
             base_title = product["title"]
 
-            pdetail = product_details.get(pid, {})
-            title = pdetail.get("title", base_title)
+            pdetail     = product_details.get(pid, {})
+            title       = pdetail.get("title", base_title)
             collections = pdetail.get("collections", [])
-            available = pdetail.get("available", product.get("totalInventory"))
-            incoming = pdetail.get("incoming", 0)
-            price = pdetail.get("price")
-            vendor = pdetail.get("vendor", "")
- 
+            available   = pdetail.get("available", product.get("totalInventory"))
+            incoming    = pdetail.get("incoming", 0)
+            price       = pdetail.get("price")
+            vendor      = pdetail.get("vendor", "")
+
             is_preorder = "Preorder" in collections
-            is_op = title.upper().startswith("OP:")
- 
+            is_op       = title.upper().startswith("OP:")
+
             if pid in effective_exclusions or "cookbook club" in title.lower():
                 continue
- 
+
             label_parts = []
             if attrs.get("_signed") == "true":
                 label_parts.append("Signed")
             if attrs.get("_bookplate") == "true":
                 label_parts.append("Bookplate")
             attr_label = ", ".join(label_parts)
- 
-            sku = variant.get("sku")
+
+            sku     = variant.get("sku")
             barcode = variant.get("barcode")
- 
-            source = order.get("sourceName", "")
-            handle = (order.get("channel") or {}).get("handle", "")
-            is_online = (source == "web") or (handle == "online_store")
-            quantity_target = "ol_sold" if is_online else "pos_sold"
- 
+
+            source         = order.get("sourceName", "")
+            handle         = (order.get("channel") or {}).get("handle", "")
+            is_online_sale = (source == "web") or (handle == "online_store")
+            quantity_target = "ol_sold" if is_online_sale else "pos_sold"
+
             if is_op:
-                 target = op_sales
+                target = op_sales
             elif is_preorder:
-                 target = preorder_sales
+                target = preorder_sales
             else:
-                 if available is not None:
-                     if available < 0:
-                         target = backorder_sales
-                     elif available == 0:
-                         target = oos_sales
-                     else:
-                         target = main_sales
-                 else:
-                     target = main_sales
- 
+                if available is not None:
+                    if available < 0:
+                        target = backorder_sales
+                    elif available == 0:
+                        target = oos_sales
+                    else:
+                        target = main_sales
+                else:
+                    target = main_sales
+
             if pid not in target:
                 target[pid] = {
                     "title": title,
@@ -482,19 +530,19 @@ def aggregate_products(orders, product_details: dict, exclusion_ids: set | None 
                 }
             else:
                 bucket = target[pid]
-                bucket["available"] = available
-                bucket["incoming"] = incoming
+                bucket["available"]   = available
+                bucket["incoming"]    = incoming
                 bucket["collections"] = collections
-                bucket["title"] = title
-                bucket["price"] = price
-                bucket["vendor"] = vendor
+                bucket["title"]       = title
+                bucket["price"]       = price
+                bucket["vendor"]      = vendor
                 if sku:
                     bucket["author"] = sku
                 if barcode:
                     bucket["isbn"] = barcode
- 
+
             target[pid][quantity_target] += item["quantity"]
- 
+
     return main_sales, backorder_sales, oos_sales, preorder_sales, op_sales
 
 
@@ -506,7 +554,7 @@ def sort_title_key(title: str) -> str:
     import unicodedata
 
     normalized = unicodedata.normalize("NFKD", title)
-    lowered = normalized.lower()
+    lowered    = normalized.lower()
 
     for article in ("the ", "a ", "an "):
         if lowered.startswith(article):
@@ -618,23 +666,23 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
                 ])
 
         if op_sales:
-             writer.writerow([])
-             writer.writerow(["OUT OF PRINT"])
-             writer.writerow([])
-             writer.writerow(header)
-             for _, info in sorted(op_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
-                 writer.writerow([
-                     info["title"],
-                     info["author"],
-                     info.get("vendor", ""),
-                     info["isbn"],
-                     info.get("price", ""),
-                     ", ".join(info["collections"]),
-                     info["available"] if info["available"] is not None else "",
-                     info.get("incoming", 0),
-                     info["attributes"],
-                     "",
-               ])
+            writer.writerow([])
+            writer.writerow(["OUT OF PRINT"])
+            writer.writerow([])
+            writer.writerow(header)
+            for _, info in sorted(op_sales.items(), key=lambda x: sort_title_key(x[1]["title"])):
+                writer.writerow([
+                    info["title"],
+                    info["author"],
+                    info.get("vendor", ""),
+                    info["isbn"],
+                    info.get("price", ""),
+                    ", ".join(info["collections"]),
+                    info["available"] if info["available"] is not None else "",
+                    info.get("incoming", 0),
+                    info["attributes"],
+                    "",
+                ])
 
     logging.info("CSV written: %s", filename)
     return filename
@@ -646,10 +694,10 @@ def write_csv(data: tuple, filename: str, start_et: datetime, end_et: datetime, 
 
 def main():
     load_dotenv()
-    args = parse_args()
+    args   = parse_args()
     client = ShopifyClient()
 
-    tz_et = ZoneInfo("America/New_York")
+    tz_et    = ZoneInfo("America/New_York")
     today_et = datetime.now(tz_et)
 
     def _parse_ymd(s: str):
@@ -660,7 +708,7 @@ def main():
 
     if args.start_date or args.end_date:
         start_date = _parse_ymd(args.start_date) if args.start_date else None
-        end_date = _parse_ymd(args.end_date) if args.end_date else None
+        end_date   = _parse_ymd(args.end_date)   if args.end_date   else None
 
         if start_date is None:
             start_date, _ = get_reporting_window(today_et.date())
@@ -671,7 +719,7 @@ def main():
             raise ValueError(f"end-date {end_date} cannot be before start-date {start_date}")
 
         start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0).replace(tzinfo=tz_et)
-        end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59).replace(tzinfo=tz_et)
+        end_et   = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59).replace(tzinfo=tz_et)
 
     else:
         if not is_business_day(today_et.date()):
@@ -679,13 +727,13 @@ def main():
             return
 
         start_date, _ = get_reporting_window(today_et.date())
-        end_date = today_et.date()
+        end_date      = today_et.date()
 
         start_et = datetime(start_date.year, start_date.month, start_date.day, 10, 0, 0).replace(tzinfo=tz_et)
-        end_et = datetime(end_date.year, end_date.month, end_date.day, 9, 59, 59).replace(tzinfo=tz_et)
+        end_et   = datetime(end_date.year,   end_date.month,   end_date.day,   9, 59, 59).replace(tzinfo=tz_et)
 
     logging.info(f"Reporting window start ET: {start_et}")
-    logging.info(f"Reporting window end ET: {end_et}")
+    logging.info(f"Reporting window end ET:   {end_et}")
     logging.info(f"UTC window: {start_et.astimezone(ZoneInfo('UTC'))} → {end_et.astimezone(ZoneInfo('UTC'))}")
 
     if args.start_date or args.end_date:
@@ -693,17 +741,16 @@ def main():
 
     now_et = today_et
 
-    orders = _with_retry(fetch_24h_orders, client, start_et, end_et)
-
-    product_ids = extract_product_ids(orders)
+    orders          = _with_retry(fetch_24h_orders, client, start_et, end_et)
+    product_ids     = extract_product_ids(orders)
     product_details = _with_retry(fetch_product_details, client, product_ids)
 
     main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = aggregate_products(
-         orders,
-         product_details,
+        orders,
+        product_details,
     )
 
-    filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
+    filename     = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
     pdf_filename = f"daily_sales_report_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf"
 
     if not args.dry_run:
@@ -721,15 +768,15 @@ def main():
 
     if not args.dry_run:
         sections = {
-            "main": list(main_sales.values()),
-            "backorders": list(backorder_sales.values()),
-            "out_of_stock": list(oos_sales.values()),
-            "preorders": list(preorder_sales.values()),
-            "op_salse": list(op_sales.values()),
+            "main":        list(main_sales.values()),
+            "backorders":  list(backorder_sales.values()),
+            "out_of_stock":list(oos_sales.values()),
+            "preorders":   list(preorder_sales.values()),
+            "op_sales":    list(op_sales.values()),
         }
 
         report_title = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
-        window_text = (
+        window_text  = (
             f"{start_et.strftime('%b %d %Y %I:%M %p ET')} → "
             f"{end_et.strftime('%b %d %Y %I:%M %p ET')}"
         )
@@ -744,7 +791,7 @@ def main():
     if not args.dry_run:
         filepath = os.path.join(os.getcwd(), filename)
 
-        subject = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
+        subject   = f"Daily Sales Report — {now_et.strftime('%B %d, %Y')}"
         html_body = (
             "<p>Your daily sales report is attached.</p>"
             f"<p><strong>{filename}</strong></p>"

@@ -52,6 +52,11 @@ from shopify_client import ShopifyClient
 from services.supabase_client import supabase
 from services.utils import _with_retry
 
+LOCATION_NAMES = {
+    "kal":  "Kitchen Arts & Letters",
+    "nyfs": "New York Food Stories",
+}
+
 def _bucket_to_dict(info: dict) -> dict:
     return {
         "title":       info.get("title", ""),
@@ -161,6 +166,14 @@ def run_daily_sales_report(
     recipient_override = parameters.get("recipients")  # list of email strings or None
     ignore_exclusions  = bool(parameters.get("ignore_exclusions", False))
     include_table_data = delivery_method == "table"
+    location_id        = parameters.get("location_id")  # Shopify GID or None
+    cal_location      = parameters.get("cal_location", "kal")  # 'kal' | 'nyfs'
+    location_name      = LOCATION_NAMES.get(cal_location, "Kitchen Arts & Letters")
+
+    if not recipient_override and cal_location == "nyfs":
+        nyfs_recipients_raw = os.getenv("NYFS_EMAIL_RECIPIENTS", "")
+        if nyfs_recipients_raw:
+            recipient_override = [r.strip() for r in nyfs_recipients_raw.split(",") if r.strip()]
 
     tz_et = ZoneInfo("America/New_York")
 
@@ -182,7 +195,8 @@ def run_daily_sales_report(
         if scheduled_date_str:
             run_date = date.fromisoformat(scheduled_date_str)
 
-        schedule_override = _check_schedule_override("daily_sales", run_date)
+        report_id_for_override = f"daily_sales_{cal_location}"
+        schedule_override = _check_schedule_override(report_id_for_override, run_date)
 
         if schedule_override:
             # Admin has set a custom window for this run date
@@ -215,8 +229,8 @@ def run_daily_sales_report(
     date_range_short = _fmt_date_range_short(start_date, end_date)
 
     if run_type == "on_demand":
-        report_title = f"Daily Sales Report — {date_range_short} (On-Demand)"
-        subject      = f"Daily Sales Report — {date_range_short} (On-Demand)"
+        report_title = f"{location_name} Daily Sales — {date_range_short} (On-Demand)"
+        subject      = f"{location_name} Daily Sales — {date_range_short} (On-Demand)"
         html_body    = (
             f"<p>This is an <strong>on-demand</strong> daily sales report covering "
             f"<strong>{date_range_short}</strong>.</p>"
@@ -224,8 +238,8 @@ def run_daily_sales_report(
             f"<p><strong>{filename}</strong></p>"
         )
     elif run_type == "override":
-        report_title = f"Daily Sales Report — {date_range_short} (Extended Window)"
-        subject      = f"Daily Sales Report — {date_range_short} (Extended Window)"
+        report_title = f"{location_name} Daily Sales — {date_range_short} (Extended Window)"
+        subject      = f"{location_name} Daily Sales — {date_range_short} (Extended Window)"
         label_note   = f" — {override_label}" if override_label else ""
         html_body    = (
             f"<p>This daily sales report covers an <strong>extended window</strong>"
@@ -235,8 +249,8 @@ def run_daily_sales_report(
         )
     else:
         # Standard automated run
-        report_title = f"Daily Sales Report — {start_et.strftime('%B %d, %Y')}"
-        subject      = f"Daily Sales Report — {start_et.strftime('%B %d, %Y')}"
+        report_title = f"{location_name} Daily Sales — {start_et.strftime('%B %d, %Y')}"
+        subject      = f"{location_name} Daily Sales — {start_et.strftime('%B %d, %Y')}"
         html_body    = (
             f"<p>Your daily sales report is attached.</p>"
             f"<p><strong>{filename}</strong></p>"
@@ -255,10 +269,10 @@ def run_daily_sales_report(
 
     orders          = fetch_24h_orders(client, start_et, end_et)
     product_ids     = extract_product_ids(orders)
-    product_details = _with_retry(fetch_product_details, client, product_ids)
+    product_details = _with_retry(fetch_product_details, client, product_ids, location_id=location_id)
 
     main_sales, backorder_sales, oos_sales, preorder_sales, op_sales = aggregate_products(
-        orders, product_details, exclusion_ids=exclusion_ids
+        orders, product_details, exclusion_ids=exclusion_ids, location_id=location_id,
     )
 
     sections_raw = {
