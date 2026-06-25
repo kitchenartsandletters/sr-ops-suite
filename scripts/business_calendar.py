@@ -9,10 +9,16 @@ Locations:
     nyfs — 111 Broadway, Tue–Sun, opens 12:00 PM ET
 
 Holiday closures are shared across both locations.
-Special open Sundays are location-scoped.
+Special open Sundays and open overrides are location-scoped.
 
 DB overrides (reports.business_calendar_overrides) always win over the
 hardcoded baseline when location_id matches.
+
+Override types:
+    holiday_closure     — marks an otherwise-open day as closed
+    special_open_sunday — marks a Sunday as open (KAL only)
+    open_override       — marks a baseline holiday as open for a specific location
+                          (e.g. NYFS open on July 4th)
 """
 
 import logging
@@ -36,8 +42,8 @@ LOCATION_CLOSE_TIME = {
 
 # Weekdays open by default (0=Mon, 1=Tue, ..., 6=Sun)
 LOCATION_OPEN_WEEKDAYS = {
-    LOCATION_KAL:  {0, 1, 2, 3, 4, 5},       # Mon–Sat
-    LOCATION_NYFS: {1, 2, 3, 4, 5, 6},       # Tue–Sun
+    LOCATION_KAL:  {0, 1, 2, 3, 4, 5},   # Mon–Sat
+    LOCATION_NYFS: {1, 2, 3, 4, 5, 6},   # Tue–Sun
 }
 
 # ─── Hardcoded holiday closures (shared across both locations) ────────────────
@@ -82,13 +88,21 @@ _db_overrides_cache: dict[str, dict] = {}  # keyed by location_id
 def _load_db_overrides(location_id: str) -> dict:
     """
     Fetch calendar overrides from Supabase for a given location.
-    Returns {"holiday_closure": set[date], "special_open_sunday": set[date]}.
+    Returns {
+        "holiday_closure":     set[date],
+        "special_open_sunday": set[date],
+        "open_override":       set[date],
+    }
     Cached per location per process lifetime.
     """
     if location_id in _db_overrides_cache:
         return _db_overrides_cache[location_id]
 
-    result = {"holiday_closure": set(), "special_open_sunday": set()}
+    result = {
+        "holiday_closure":     set(),
+        "special_open_sunday": set(),
+        "open_override":       set(),
+    }
 
     try:
         from services.supabase_client import supabase
@@ -101,7 +115,7 @@ def _load_db_overrides(location_id: str) -> dict:
             .execute()
         )
         for row in (resp.data or []):
-            d = date.fromisoformat(row["date"])
+            d     = date.fromisoformat(row["date"])
             otype = row["override_type"]
             if otype in result:
                 result[otype].add(d)
@@ -123,26 +137,38 @@ def is_business_day(d: date, location_id: str = LOCATION_KAL) -> bool:
     """
     Return True if d is an open business day for the given location.
     DB overrides take precedence over the hardcoded baseline.
+
+    Priority order (first match wins):
+    1. DB holiday_closure      -> closed
+    2. DB open_override        -> open (cancels a baseline holiday for this location)
+    3. DB special_open_sunday  -> open
+    4. Baseline HOLIDAY_CLOSURES -> closed
+    5. KAL special open Sundays  -> open
+    6. Baseline weekday check
     """
     overrides = _load_db_overrides(location_id)
 
-    # DB holiday closure always wins
+    # 1. DB holiday closure always closes
     if d in overrides["holiday_closure"]:
         return False
 
-    # DB special open Sunday always wins
+    # 2. DB open override — location is open despite baseline holiday
+    if d in overrides["open_override"]:
+        return True
+
+    # 3. DB special open Sunday
     if d in overrides["special_open_sunday"]:
         return True
 
-    # Hardcoded holiday closures (shared)
+    # 4. Hardcoded holiday closures (shared baseline)
     if d in HOLIDAY_CLOSURES:
         return False
 
-    # KAL special open Sundays
+    # 5. KAL special open Sundays
     if location_id == LOCATION_KAL and d in KAL_OPEN_SUNDAYS:
         return True
 
-    # Baseline weekday check
+    # 6. Baseline weekday check
     return d.weekday() in LOCATION_OPEN_WEEKDAYS.get(location_id, set())
 
 
