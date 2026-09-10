@@ -204,8 +204,9 @@ class ShopifyClient:
         try:
             self.graphql(VALIDATE_QUERY)
             logging.info(f"[shopify] API connection validated: {self.base_url}")
-        except RuntimeError as e:
-            if "Not Found" in str(e) or "404" in str(e):
+        except (RuntimeError, requests.exceptions.HTTPError) as e:
+            msg = str(e)
+            if "Not Found" in msg or "404" in msg:
                 raise RuntimeError(
                     f"Shopify API version may be sunset. "
                     f"Check SHOPIFY_API_VERSION env var. URL: {self.base_url}"
