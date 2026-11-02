@@ -19,9 +19,14 @@ Override types:
     special_open_sunday — marks a Sunday as open (KAL only)
     open_override       — marks a baseline holiday as open for a specific location
                           (e.g. NYFS open on July 4th)
+
+NOTE ON DATES: everything here is plain `date` arithmetic. The ET open/close
+instants are built by the caller with ZoneInfo, which resolves EDT/EST per date,
+so merged windows that cross a DST transition are correct (49h in fall, 47h in spring).
 """
 
 import logging
+import time
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -47,6 +52,8 @@ LOCATION_OPEN_WEEKDAYS = {
 }
 
 # ─── Hardcoded holiday closures (shared across both locations) ────────────────
+# TODO: no 2027 entries exist yet. Until they are added (here AND in the dashboard's
+# BusinessCalendarPage.tsx baseline, or as DB rows), 2027 holidays are treated as open days.
 
 HOLIDAY_CLOSURES = {
     # 2025
@@ -81,8 +88,23 @@ KAL_OPEN_SUNDAYS = {
 
 
 # ─── DB override cache ────────────────────────────────────────────────────────
+# The report worker is a long-lived process. The previous cache was never
+# invalidated, so a closure added in the dashboard after the worker started was
+# ignored until the next deploy — and a failed load cached an EMPTY result forever.
+# Now: entries expire after _CACHE_TTL_SECONDS, and a failed load serves the last
+# known-good data (or an uncached empty result) instead of poisoning the cache.
 
-_db_overrides_cache: dict[str, dict] = {}  # keyed by location_id
+_CACHE_TTL_SECONDS = 300
+_FAILED_RETRY_SECONDS = 60
+_db_overrides_cache: dict[str, tuple[float, dict]] = {}   # location_id -> (loaded_at_monotonic, data)
+
+
+def _empty_overrides() -> dict:
+    return {
+        "holiday_closure":     set(),
+        "special_open_sunday": set(),
+        "open_override":       set(),
+    }
 
 
 def _load_db_overrides(location_id: str) -> dict:
@@ -93,16 +115,14 @@ def _load_db_overrides(location_id: str) -> dict:
         "special_open_sunday": set[date],
         "open_override":       set[date],
     }
-    Cached per location per process lifetime.
+    Cached for _CACHE_TTL_SECONDS.
     """
-    if location_id in _db_overrides_cache:
-        return _db_overrides_cache[location_id]
+    now    = time.monotonic()
+    cached = _db_overrides_cache.get(location_id)
+    if cached and (now - cached[0]) < _CACHE_TTL_SECONDS:
+        return cached[1]
 
-    result = {
-        "holiday_closure":     set(),
-        "special_open_sunday": set(),
-        "open_override":       set(),
-    }
+    result = _empty_overrides()
 
     try:
         from services.supabase_client import supabase
@@ -121,8 +141,13 @@ def _load_db_overrides(location_id: str) -> dict:
                 result[otype].add(d)
     except Exception as e:
         logging.warning(f"[calendar] Failed to load DB overrides for {location_id}: {e}")
+        if cached:
+            # Serve stale-but-real data; retry sooner than a full TTL.
+            _db_overrides_cache[location_id] = (now - _CACHE_TTL_SECONDS + _FAILED_RETRY_SECONDS, cached[1])
+            return cached[1]
+        return result            # empty, deliberately NOT cached so the next call retries
 
-    _db_overrides_cache[location_id] = result
+    _db_overrides_cache[location_id] = (now, result)
     return result
 
 
