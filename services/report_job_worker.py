@@ -201,6 +201,16 @@ def _execute_daily_sales_for_location(parameters: dict, location_id: str, cal_lo
     if start_date_str and end_date_str:
         start_date = datetime.fromisoformat(start_date_str).date()
         end_date   = datetime.fromisoformat(end_date_str).date()
+        # A run covers start_date at opening up to end_date just before opening, so
+        # equal or reversed dates produce an empty (inverted) window. Fail loudly
+        # instead of "succeeding" with zero rows (seen 2026-10-21, emailed empty).
+        if end_date <= start_date:
+            raise ValueError(
+                f"Invalid date range: end_date ({end_date}) must be after start_date "
+                f"({start_date}). A run covers {start_date} from {open_h:02d}:{open_m:02d} ET "
+                f"up to {end_date} {close_h:02d}:{close_m:02d} ET, so equal or reversed dates "
+                f"cover nothing. For one day's sales, set end_date to the next day."
+            )
         parameters = {**parameters, "is_manual": True}
 
     else:
