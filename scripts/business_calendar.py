@@ -12,7 +12,6 @@ holidays in the dashboard before the year starts.
 
 Locations:
     kal  — 1435 Lexington Ave, Mon–Sat, opens 10:00 AM ET
-    nyfs — 111 Broadway, Tue–Sun, opens 12:00 PM ET (pop-up closed Sept 2026)
 
 Override types:
     holiday_closure     — marks an otherwise-open day as closed
@@ -36,22 +35,18 @@ from zoneinfo import ZoneInfo
 # ─── Location config ──────────────────────────────────────────────────────────
 
 LOCATION_KAL  = "kal"
-LOCATION_NYFS = "nyfs"
 
 LOCATION_OPEN_TIME = {
     LOCATION_KAL:  (10, 0),   # 10:00 AM ET
-    LOCATION_NYFS: (12, 0),   # 12:00 PM ET
 }
 
 LOCATION_CLOSE_TIME = {
     LOCATION_KAL:  (9, 59),   # 9:59 AM ET next day
-    LOCATION_NYFS: (11, 59),  # 11:59 AM ET next day
 }
 
 # Weekdays open by default (0=Mon, 1=Tue, ..., 6=Sun)
 LOCATION_OPEN_WEEKDAYS = {
     LOCATION_KAL:  {0, 1, 2, 3, 4, 5},   # Mon–Sat
-    LOCATION_NYFS: {1, 2, 3, 4, 5, 6},   # Tue–Sun
 }
 
 # ─── DB override cache ────────────────────────────────────────────────────────
