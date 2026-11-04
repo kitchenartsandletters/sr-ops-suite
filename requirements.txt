@@ -1,4 +1,7 @@
-requests>=2.31.0
-python-dotenv>=1.0.1
-reportlab>=3.6.12
-supabase>=2.0.0
+# Pinned 2026-11-04. Unpinned (">=") ranges silently upgraded dependencies on every deploy:
+# supabase-py went 2.33.0 -> 2.34.0 (released the day before) without anyone choosing it.
+# Change versions on purpose, then confirm with a table-mode test job (docs/SHOPIFY_API_VERSIONING.md, step 4).
+requests==2.34.2
+python-dotenv==1.2.4
+reportlab==5.1.0
+supabase==2.33.0
