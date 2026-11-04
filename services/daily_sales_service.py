@@ -54,7 +54,6 @@ from services.utils import _with_retry
 
 LOCATION_NAMES = {
     "kal":  "Kitchen Arts & Letters",
-    "nyfs": "New York Food Stories",
 }
 
 def _bucket_to_dict(info: dict) -> dict:
@@ -167,13 +166,8 @@ def run_daily_sales_report(
     ignore_exclusions  = bool(parameters.get("ignore_exclusions", False))
     include_table_data = delivery_method == "table"
     location_id        = parameters.get("location_id")  # Shopify GID or None
-    cal_location      = parameters.get("cal_location", "kal")  # 'kal' | 'nyfs'
+    cal_location      = parameters.get("cal_location", "kal")  # 'kal'
     location_name      = LOCATION_NAMES.get(cal_location, "Kitchen Arts & Letters")
-
-    if not recipient_override and cal_location == "nyfs":
-        nyfs_recipients_raw = os.getenv("NYFS_EMAIL_RECIPIENTS", "")
-        if nyfs_recipients_raw:
-            recipient_override = [r.strip() for r in nyfs_recipients_raw.split(",") if r.strip()]
 
     tz_et = ZoneInfo("America/New_York")
 
