@@ -43,7 +43,7 @@ import requests
 
 VALIDATE_QUERY = """{ shop { name } }"""
 
-DEFAULT_API_VERSION = "2025-10"
+DEFAULT_API_VERSION = "2026-10"   # supported until 2027-10-16; bump per docs/SHOPIFY_API_VERSIONING.md
 
 # Refresh this many seconds before the token's stated expiry, to absorb clock
 # skew and requests already in flight when the token would otherwise lapse.
@@ -193,6 +193,10 @@ def get_token_manager() -> TokenManager:
 class ShopifyClient:
     def __init__(self) -> None:
         api_version = os.getenv("SHOPIFY_API_VERSION", DEFAULT_API_VERSION)
+        self.api_version = api_version
+        # Version Shopify says it actually served (X-Shopify-API-Version). If a requested
+        # version is past end of life, this can differ from api_version.
+        self.served_api_version: Optional[str] = None
         self._tokens = get_token_manager()
         self.base_url = (
             f"https://{self._tokens.domain}/admin/api/{api_version}/graphql.json"
@@ -204,6 +208,17 @@ class ShopifyClient:
         try:
             self.graphql(VALIDATE_QUERY)
             logging.info(f"[shopify] API connection validated: {self.base_url}")
+            served = self.served_api_version
+            if served is None:
+                logging.info("[shopify] Served API version not reported by Shopify.")
+            elif served != self.api_version:
+                logging.warning(
+                    f"[shopify] Requested API version {self.api_version} but Shopify served "
+                    f"{served}. The requested version is likely past end of life — bump "
+                    f"SHOPIFY_API_VERSION (see docs/SHOPIFY_API_VERSIONING.md)."
+                )
+            else:
+                logging.info(f"[shopify] Served API version: {served}")
         except (RuntimeError, requests.exceptions.HTTPError) as e:
             msg = str(e)
             if "Not Found" in msg or "404" in msg:
@@ -229,6 +244,7 @@ class ShopifyClient:
         self.session.headers["X-Shopify-Access-Token"] = self._tokens.get_token()
         payload = {"query": query, "variables": variables or {}}
         resp = self.session.post(self.base_url, json=payload, timeout=(10, 120))
+        self.served_api_version = resp.headers.get("X-Shopify-API-Version") or self.served_api_version
 
         # 401 == invalid/expired token. Refresh once and retry. We deliberately
         # do NOT retry on 403: that is a scope/permission problem a refresh
