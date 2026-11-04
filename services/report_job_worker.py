@@ -33,7 +33,6 @@ from scripts.business_calendar import (
     get_open_time,
     get_close_time,
     LOCATION_KAL,
-    LOCATION_NYFS,
 )
 
 
@@ -43,13 +42,9 @@ from scripts.business_calendar import (
 
 POLL_INTERVAL_SECONDS = int(os.getenv("REPORT_WORKER_POLL_INTERVAL", "5"))
 KAL_LOCATION_ID  = os.getenv("KAL_LOCATION_ID",  "gid://shopify/Location/40052293765")
-NYFS_LOCATION_ID = os.getenv("NYFS_LOCATION_ID", "gid://shopify/Location/67668738181")
 
 # Automated jobs that MUST exist on business days, and the ET time by which they must.
 # (report_id, calendar location, deadline hour ET, deadline minute ET)
-# NYFS is intentionally absent: the pop-up closed in Sept 2026 and its cron is disabled.
-# If it returns, add ("daily_sales_nyfs", LOCATION_NYFS, 12, 30) — and fix its enqueue gate
-# the same way as KAL's (cron/daily_sales_nyfs/enqueue_job.py has the identical DST flaw).
 EXPECTED_AUTOMATED_RUNS = [
     ("daily_sales_kal", LOCATION_KAL, 10, 30),
 ]
@@ -189,8 +184,9 @@ def check_expected_runs(now_et: datetime | None = None):
 
 def _execute_daily_sales_for_location(parameters: dict, location_id: str, cal_location: str):
     """
-    Shared executor logic for both KAL and NYFS daily sales reports.
-    cal_location: 'kal' or 'nyfs' — used for business calendar lookups.
+    Executor logic for location-scoped daily sales reports (currently KAL only;
+    the NYFS pop-up report was retired 2026-11-04).
+    cal_location: business calendar location, e.g. 'kal'.
     location_id:  Shopify location GID — used for order and inventory filtering.
     """
     tz_et    = ZoneInfo("America/New_York")
@@ -260,17 +256,8 @@ def execute_daily_sales_kal(parameters: dict):
     )
 
 
-def execute_daily_sales_nyfs(parameters: dict):
-    return _execute_daily_sales_for_location(
-        parameters,
-        location_id=NYFS_LOCATION_ID,
-        cal_location=LOCATION_NYFS,
-    )
-
-
 REPORT_EXECUTORS = {
     "daily_sales_kal":  execute_daily_sales_kal,
-    "daily_sales_nyfs": execute_daily_sales_nyfs,
 }
 
 
