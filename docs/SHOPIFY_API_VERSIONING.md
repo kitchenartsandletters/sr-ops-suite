@@ -2,166 +2,108 @@
 
 ## Overview
 
-Shopify releases a new stable API version quarterly (January, April, July, October) and retires versions after approximately 12 months. Staying current prevents silent failures like the June 3, 2026 report outage. This document defines how KAL maintains API version hygiene across all services.
+Shopify releases a new stable Admin API version every quarter (January, April, July, October). Each version is supported for at least 12 months, then stops being accessible. A version past its end of access can keep "working" while Shopify serves a different version behind it, so a stale version degrades silently rather than failing loudly.
+
+Incident history:
+- **2026-06-03** — report failed on a transient Shopify "Not Found"; led to `validate_connection()` and retries.
+- **2026-10-16 → 2026-11-04** — the worker kept requesting `2025-10` for 19 days after its end of access. Reports still ran; nothing flagged it. Led to the served-version check below.
+
+**Current version in use:** `2026-10` (set 2026-11-04, verified against a known report window)
+**Accessible until:** 2027-10-16 15:00 UTC
+**Bump by:** July 2027 (move to `2027-07`), and never later than 2027-10-16
+**Source of truth:** https://shopify.dev/docs/api/usage/versioning
 
 ---
 
-## Version Lifecycle
+## Version Lifecycle (from Shopify's versioning page, Nov 2026)
 
-Shopify's release and retirement schedule:
+| Version | Released     | Accessible until         | Status (Nov 2026)  |
+|---------|--------------|--------------------------|--------------------|
+| 2025-07 | Jul 1, 2025  | Jul 16, 2026 15:00 UTC   | Unsupported        |
+| 2025-10 | Oct 1, 2025  | Oct 16, 2026 15:00 UTC   | Unsupported        |
+| 2026-01 | Jan 1, 2026  | Jan 16, 2027 15:00 UTC   | Stable             |
+| 2026-04 | Apr 1, 2026  | Apr 16, 2027 15:00 UTC   | Stable             |
+| 2026-07 | Jul 1, 2026  | Jul 16, 2027 15:00 UTC   | Stable             |
+| 2026-10 | Oct 1, 2026  | Oct 16, 2027 15:00 UTC   | Latest stable      |
+| 2027-01 | Jan 1, 2027  | Jan 16, 2028 15:00 UTC   | Release candidate  |
 
-| Version    | Released     | Retirement (approx.) |
-|------------|--------------|----------------------|
-| 2025-01    | Jan 2025     | Jan 2026             |
-| 2025-04    | Apr 2025     | Apr 2026             |
-| 2025-07    | Jul 2025     | Jul 2026             |
-| 2025-10    | Oct 2025     | Oct 2026             |
-| 2026-01    | Jan 2026     | Jan 2027             |
-| 2026-04    | Apr 2026     | Apr 2027             |
-
-**Current version in use:** `2025-10`
-**Next required update:** before October 2026
-**Source of truth:** https://shopify.dev/docs/api/usage/versioning
-
-Shopify sends deprecation emails to the app contact address when a version approaches retirement. Ensure the Shopify app contact email is monitored.
+Never run a release candidate in production.
 
 ---
 
 ## Where the Version Is Used
 
-### Environment Variables (Railway)
+**sr-ops-suite — one setting.** Every Shopify call goes through `ShopifyClient` in `scripts/shopify_client.py` (`lop_unfulfilled_report.py` re-imports it). The URL is built from:
 
-| Service            | Variable              | Current Value |
-|--------------------|-----------------------|---------------|
-| sr-ops-suite worker | `SHOPIFY_API_VERSION` | `2025-10`     |
-| admin-dashboard backend | `SHOPIFY_API_VERSION` | `2025-10` (verify) |
+| Where | Setting | Value |
+|-------|---------|-------|
+| Railway: **report worker** service | `SHOPIFY_API_VERSION` | `2026-10` |
+| `scripts/shopify_client.py` | `DEFAULT_API_VERSION` (fallback if the env var is unset) | `2026-10` |
 
-Both services construct their Shopify API URL from this env var. Updating the env var and redeploying is sufficient for most version bumps.
+Keep these two equal. The cron/enqueue services do not call Shopify and need no version.
 
-### Code References
+**admin-dashboard backend — none.** It no longer calls Shopify. The Shopify proxy (and the old hardcoded `2023-10`) moved to **request-service** (`api.kitchenartsandletters.com`). Any `SHOPIFY_API_VERSION` left on the dashboard service is dead and can be deleted.
 
-All Shopify API calls route through `ShopifyClient` in `scripts/shopify_client.py` (or `scripts/lop_unfulfilled_report.py` for the LOP report). The URL is constructed once at init:
+**request-service — owns its own Shopify calls.** Not covered by this document; check its version separately on the same schedule.
 
-```python
-self.base_url = f"https://{base_domain}/admin/api/{api_version}/graphql.json"
+---
+
+## How We Detect Drift
+
+On every job, `ShopifyClient.validate_connection()` records the `X-Shopify-API-Version` response header (the version Shopify actually served) and logs one of:
+
 ```
-
-The one exception is the Shopify GraphQL proxy in `admin-dashboard/backend/app/routes.py` which has a hardcoded version string:
-
-```python
-f"https://{os.getenv('SHOP_URL')}/admin/api/2023-10/graphql.json"
+[shopify] Served API version: 2026-10                     <- healthy
+[shopify] Requested API version X but Shopify served Y.   <- WARNING: X is past end of life, bump now
+[shopify] Served API version not reported by Shopify.     <- header absent; check manually
 ```
-
-**This is a known issue.** This route still uses `2023-10` which has been retired. It should be updated to read from an env var. See Hardcoded Versions below.
 
 ---
 
 ## Update Procedure
 
-Run this procedure once per quarter, or immediately when a Shopify deprecation email arrives.
+Run once per year at minimum (or when Shopify emails about a deprecation). Shopify sends these to the app's contact address — keep it monitored.
 
-### Step 1 — Check the current stable version
+1. **Pick the target.** Latest *stable* version on the versioning page.
+2. **Check our fields against it.** Open the target version's reference pages for `Order` and `Product` and confirm every field we query still exists (deprecated is OK; removed is not):
+   - `orders`: `processedAt`, `sourceName`, `channel { handle }`, `retailLocation { id }`, `lineItems { quantity title customAttributes variant { id sku barcode product { id title totalInventory } } }`, `pageInfo`
+   - `product`: `title`, `vendor`, `totalInventory`, `priceRangeV2.minVariantPrice`, `collections`, `variants.inventoryItem.inventoryLevels { location { id } quantities(names: ["available","incoming"]) }`
+3. **Set the env var** on the report worker and update `DEFAULT_API_VERSION` to match. Railway redeploys the worker.
+4. **Verify with a known window.** Re-run a recent day in table mode (no email) and compare `result.row_counts` to the automated job for the same window. The total must match exactly; the split between sections can shift only if inventory moved since.
+   ```sql
+   INSERT INTO reports.report_jobs (report_id, status, parameters)
+   VALUES ('daily_sales_kal','queued',
+     '{"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","delivery_method":"table","formats":["pdf","csv"],"test":"API bump"}');
+   ```
+5. **Check the worker log** for `[shopify] Served API version: <target>`.
+6. **Update this document** (current version, accessible-until, bump-by, lifecycle table).
 
-Go to https://shopify.dev/docs/api/usage/versioning and confirm the latest stable release. Do not use release candidate (`-rc`) versions in production.
+### Deprecation watch list
 
-### Step 2 — Review the changelog for breaking changes
+| Field | Status | Plan |
+|-------|--------|------|
+| `Order.physicalLocation` | Deprecated | Replaced by `Order.retailLocation` (2026-11-04) |
+| `Order.channel` | Deprecated, still present in 2026-10 | Used only as a secondary online-sale signal next to `sourceName`. Re-check at the 2027 bump; replace or drop before it is removed. |
 
-Go to https://shopify.dev/changelog and filter by the new version. Check for:
-- Removed or renamed fields in queries used by our scripts
-- Changed response shapes (especially `pageInfo`, `edges`, `node` patterns)
-- Deprecated mutations or query arguments
-- Changes to `financial_status`, `processedAt`, `totalInventory`, `inventoryLevels`, or `committed` quantities — all of which are used in our reports
-
-Key queries to verify against the changelog:
-- `orders` with `processedAt`, `sourceName`, `channel`, `lineItems`, `variant`, `product`
-- `product` with `totalInventory`, `priceRangeV2`, `collections`, `variants`, `inventoryItem`, `inventoryLevels`, `quantities`
-- `draftOrders` with `completedAt`, `order`
-- `products` with `status`, `onlineStoreUrl`, `collections`, `variants`, `inventoryItem`
-
-### Step 3 — Test in staging (or dry-run)
-
-Run `daily_sales_report.py --dry-run` and `weekly_maintenance_report.py` locally with the new version set:
-
-```bash
-SHOPIFY_API_VERSION=2026-01 python scripts/daily_sales_report.py --dry-run
-```
-
-Watch for GraphQL errors indicating field removals or shape changes.
-
-### Step 4 — Update env vars in Railway
-
-Update `SHOPIFY_API_VERSION` on:
-- sr-ops-suite worker service
-- admin-dashboard backend service (if used there)
-- sr-ops-suite cron service (if it makes direct Shopify calls)
-
-### Step 5 — Fix hardcoded versions
-
-Update the hardcoded version in `admin-dashboard/backend/app/routes.py`:
-
-```python
-# Change:
-f"https://{os.getenv('SHOP_URL')}/admin/api/2023-10/graphql.json"
-
-# To:
-api_version = os.getenv("SHOPIFY_API_VERSION", "2025-10")
-f"https://{os.getenv('SHOP_URL')}/admin/api/{api_version}/graphql.json"
-```
-
-### Step 6 — Redeploy and monitor
-
-Deploy both services. Watch worker logs for the startup validation message:
-
-```
-[shopify] API connection validated: https://castironbooks.myshopify.com/admin/api/2026-01/graphql.json
-```
-
-Monitor the next two automated report runs to confirm successful email delivery.
-
-### Step 7 — Update this document
-
-Update the "Current version in use" and "Next required update" fields above.
-
----
-
-## Hardcoded Versions — Known Issues
-
-| File | Location | Current Value | Action |
-|------|----------|---------------|--------|
-| `admin-dashboard/backend/app/routes.py` | Shopify GraphQL proxy route | `2023-10` | Replace with env var read |
-
-Any new code that constructs a Shopify API URL must read from `os.getenv("SHOPIFY_API_VERSION")` and never hardcode a version string.
+Any new code that builds a Shopify URL must go through `ShopifyClient`; never hardcode a version string.
 
 ---
 
 ## Failure Mode Reference
 
-| Symptom | Likely Cause |
+| Symptom | Likely cause |
 |---------|--------------|
-| `Shopify GraphQL error: Not Found` | API version sunset or invalid `SHOP_URL` |
-| `Shopify GraphQL error: {"errors": [...]}` | Field removed or renamed in new version |
-| Report runs but data looks wrong | Response shape changed silently |
-| 401 or authentication error | `SHOPIFY_ACCESS_TOKEN` rotated or app uninstalled |
+| `WARNING Requested API version X but Shopify served Y` | X is past end of life — bump now |
+| `Shopify GraphQL error: Not Found` | Version unavailable or wrong `SHOP_URL` |
+| `Shopify GraphQL error: [... field ... doesn't exist ...]` | A field we query was removed in this version |
+| Report runs but data looks wrong | Response shape changed; compare against a known window (step 4) |
+| `Shopify token request failed: status=400/401` | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` wrong or rotated, or the app was uninstalled (`SHOPIFY_ACCESS_TOKEN` is retired and unused) |
 
-The startup validation call (`client.validate_connection()`) will surface "Not Found" immediately with a clear error message naming the env var, rather than failing silently mid-report.
+Job failures email `EMAIL_RECIPIENTS`; a missing daily job is caught by the worker's missed-run watchdog at 10:30 ET.
 
 ---
 
 ## Calendar Reminders
 
-Set a recurring calendar reminder for the first week of each month in January, April, July, and October:
-
-> **Shopify API version check due.** Review https://shopify.dev/docs/api/usage/versioning and update `SHOPIFY_API_VERSION` env vars if a new stable version is available. Retire the old version before its sunset date.
-
----
-
-## Quarterly Checklist
-
-- [ ] Check current stable version at shopify.dev
-- [ ] Review changelog for breaking changes affecting our queries
-- [ ] Run dry-run test locally with new version
-- [ ] Update `SHOPIFY_API_VERSION` env var on all Railway services
-- [ ] Fix any hardcoded version strings found in code review
-- [ ] Redeploy and monitor two report runs
-- [ ] Update "Current version in use" in this document
-- [ ] Update `INFRASTRUCTURE.md` if service topology changed
+- **July 2027:** bump to `2027-07` (procedure above).
+- **Each January, April, July, October:** 5-minute check of the versioning page for anything we use that is deprecated.
