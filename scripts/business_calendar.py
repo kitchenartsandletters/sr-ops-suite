@@ -2,23 +2,26 @@
 business_calendar.py
 
 Business calendar logic for KAL sr-ops-suite.
-Supports two locations with different baseline hours and shared holiday closures.
+
+SOURCE OF TRUTH: reports.business_calendar_overrides (per location_id).
+Holidays, special open Sundays and one-off closures all live there, and the
+admin dashboard's Business Calendar page reads and writes the same rows. There
+is no hardcoded holiday list in code any more (removed 2026-11-04, after the
+code list and the dashboard's own list had drifted apart). Add next year's
+holidays in the dashboard before the year starts.
 
 Locations:
     kal  — 1435 Lexington Ave, Mon–Sat, opens 10:00 AM ET
-    nyfs — 111 Broadway, Tue–Sun, opens 12:00 PM ET
-
-Holiday closures are shared across both locations.
-Special open Sundays and open overrides are location-scoped.
-
-DB overrides (reports.business_calendar_overrides) always win over the
-hardcoded baseline when location_id matches.
+    nyfs — 111 Broadway, Tue–Sun, opens 12:00 PM ET (pop-up closed Sept 2026)
 
 Override types:
     holiday_closure     — marks an otherwise-open day as closed
-    special_open_sunday — marks a Sunday as open (KAL only)
-    open_override       — marks a baseline holiday as open for a specific location
-                          (e.g. NYFS open on July 4th)
+    special_open_sunday — marks a Sunday as open (KAL)
+    open_override       — marks a day open that would otherwise be closed
+
+If the overrides cannot be loaded and there is no last-known-good copy, this
+module RAISES rather than guessing: a wrong calendar silently skips or adds a
+report, while a raised error fails the job and emails an alert.
 
 NOTE ON DATES: everything here is plain `date` arithmetic. The ET open/close
 instants are built by the caller with ZoneInfo, which resolves EDT/EST per date,
@@ -51,51 +54,17 @@ LOCATION_OPEN_WEEKDAYS = {
     LOCATION_NYFS: {1, 2, 3, 4, 5, 6},   # Tue–Sun
 }
 
-# ─── Hardcoded holiday closures (shared across both locations) ────────────────
-# TODO: no 2027 entries exist yet. Until they are added (here AND in the dashboard's
-# BusinessCalendarPage.tsx baseline, or as DB rows), 2027 holidays are treated as open days.
-
-HOLIDAY_CLOSURES = {
-    # 2025
-    date(2025, 1, 1),   # New Year's Day
-    date(2025, 5, 24),  # Memorial Day (Sat)
-    date(2025, 5, 25),  # Memorial Day (Sun — NYFS closed)
-    date(2025, 5, 26),  # Memorial Day
-    date(2025, 7, 4),   # Independence Day
-    date(2025, 9, 1),   # Labor Day
-    date(2025, 11, 27), # Thanksgiving
-    date(2025, 12, 25), # Christmas
-    date(2025, 12, 26), # Boxing Day
-
-    # 2026
-    date(2026, 1, 1),   # New Year's Day
-    date(2026, 5, 23),  # Memorial Day weekend (Sat)
-    date(2026, 5, 24),  # Memorial Day weekend (Sun)
-    date(2026, 5, 25),  # Memorial Day
-    date(2026, 7, 4),   # Independence Day
-    date(2026, 9, 7),   # Labor Day
-    date(2026, 11, 26), # Thanksgiving
-    date(2026, 12, 25), # Christmas
-    date(2026, 12, 26), # Boxing Day
-}
-
-# Special open Sundays for KAL (Lexington) only
-KAL_OPEN_SUNDAYS = {
-    date(2026, 12, 6),
-    date(2026, 12, 13),
-    date(2026, 12, 20),
-}
-
-
 # ─── DB override cache ────────────────────────────────────────────────────────
 # The report worker is a long-lived process. The previous cache was never
 # invalidated, so a closure added in the dashboard after the worker started was
 # ignored until the next deploy — and a failed load cached an EMPTY result forever.
-# Now: entries expire after _CACHE_TTL_SECONDS, and a failed load serves the last
-# known-good data (or an uncached empty result) instead of poisoning the cache.
+# Now: entries expire after _CACHE_TTL_SECONDS; a failed load retries, then serves
+# the last known-good data, and raises if there is none.
 
 _CACHE_TTL_SECONDS = 300
 _FAILED_RETRY_SECONDS = 60
+_LOAD_ATTEMPTS = 3
+_LOAD_RETRY_DELAY_SECONDS = 2
 _db_overrides_cache: dict[str, tuple[float, dict]] = {}   # location_id -> (loaded_at_monotonic, data)
 
 
@@ -115,40 +84,60 @@ def _load_db_overrides(location_id: str) -> dict:
         "special_open_sunday": set[date],
         "open_override":       set[date],
     }
-    Cached for _CACHE_TTL_SECONDS.
+    Cached for _CACHE_TTL_SECONDS. On failure: retries, then serves the last
+    known-good data if there is any, otherwise raises.
     """
     now    = time.monotonic()
     cached = _db_overrides_cache.get(location_id)
     if cached and (now - cached[0]) < _CACHE_TTL_SECONDS:
         return cached[1]
 
-    result = _empty_overrides()
+    last_error = None
+    for attempt in range(1, _LOAD_ATTEMPTS + 1):
+        try:
+            from services.supabase_client import supabase
+            resp = (
+                supabase
+                .schema("reports")
+                .table("business_calendar_overrides")
+                .select("date, override_type")
+                .eq("location_id", location_id)
+                .execute()
+            )
+            result = _empty_overrides()
+            rows = resp.data or []
+            for row in rows:
+                d     = date.fromisoformat(row["date"])
+                otype = row["override_type"]
+                if otype in result:
+                    result[otype].add(d)
+            if not rows:
+                logging.warning(
+                    f"[calendar] No calendar overrides found for '{location_id}'. Every "
+                    f"baseline weekday will be treated as open, including holidays."
+                )
+            _db_overrides_cache[location_id] = (time.monotonic(), result)
+            return result
+        except Exception as e:
+            last_error = e
+            logging.warning(
+                f"[calendar] Failed to load DB overrides for {location_id} "
+                f"(attempt {attempt}/{_LOAD_ATTEMPTS}): {e}"
+            )
+            if attempt < _LOAD_ATTEMPTS:
+                time.sleep(_LOAD_RETRY_DELAY_SECONDS)
 
-    try:
-        from services.supabase_client import supabase
-        resp = (
-            supabase
-            .schema("reports")
-            .table("business_calendar_overrides")
-            .select("date, override_type")
-            .eq("location_id", location_id)
-            .execute()
-        )
-        for row in (resp.data or []):
-            d     = date.fromisoformat(row["date"])
-            otype = row["override_type"]
-            if otype in result:
-                result[otype].add(d)
-    except Exception as e:
-        logging.warning(f"[calendar] Failed to load DB overrides for {location_id}: {e}")
-        if cached:
-            # Serve stale-but-real data; retry sooner than a full TTL.
-            _db_overrides_cache[location_id] = (now - _CACHE_TTL_SECONDS + _FAILED_RETRY_SECONDS, cached[1])
-            return cached[1]
-        return result            # empty, deliberately NOT cached so the next call retries
+    if cached:
+        # Serve stale-but-real data; retry sooner than a full TTL.
+        _db_overrides_cache[location_id] = (now - _CACHE_TTL_SECONDS + _FAILED_RETRY_SECONDS, cached[1])
+        logging.warning(f"[calendar] Serving last known-good overrides for {location_id}.")
+        return cached[1]
 
-    _db_overrides_cache[location_id] = (now, result)
-    return result
+    raise RuntimeError(
+        f"Business calendar unavailable for '{location_id}': could not load overrides "
+        f"from reports.business_calendar_overrides after {_LOAD_ATTEMPTS} attempts "
+        f"({last_error}). Refusing to guess which days are holidays."
+    )
 
 
 def _clear_cache():
@@ -161,39 +150,22 @@ def _clear_cache():
 def is_business_day(d: date, location_id: str = LOCATION_KAL) -> bool:
     """
     Return True if d is an open business day for the given location.
-    DB overrides take precedence over the hardcoded baseline.
+    Overrides come from the database; days without one use the location's weekdays.
 
     Priority order (first match wins):
-    1. DB holiday_closure      -> closed
-    2. DB open_override        -> open (cancels a baseline holiday for this location)
-    3. DB special_open_sunday  -> open
-    4. Baseline HOLIDAY_CLOSURES -> closed
-    5. KAL special open Sundays  -> open
-    6. Baseline weekday check
+    1. holiday_closure      -> closed
+    2. open_override        -> open
+    3. special_open_sunday  -> open
+    4. Baseline weekday check for the location
     """
     overrides = _load_db_overrides(location_id)
 
-    # 1. DB holiday closure always closes
     if d in overrides["holiday_closure"]:
         return False
-
-    # 2. DB open override — location is open despite baseline holiday
     if d in overrides["open_override"]:
         return True
-
-    # 3. DB special open Sunday
     if d in overrides["special_open_sunday"]:
         return True
-
-    # 4. Hardcoded holiday closures (shared baseline)
-    if d in HOLIDAY_CLOSURES:
-        return False
-
-    # 5. KAL special open Sundays
-    if location_id == LOCATION_KAL and d in KAL_OPEN_SUNDAYS:
-        return True
-
-    # 6. Baseline weekday check
     return d.weekday() in LOCATION_OPEN_WEEKDAYS.get(location_id, set())
 
 
