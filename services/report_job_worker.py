@@ -53,7 +53,9 @@ WATCHDOG_STOP_HOUR_ET     = 18    # don't raise missed-run alerts in the evening
 
 load_dotenv()
 
-_missing_run_alerted: set = set()   # {(report_id, 'YYYY-MM-DD')}  once per day per process
+# {(report_id, 'YYYY-MM-DD')}: days already settled (job found, alerted, or not a
+# business day). Each report is checked until settled, then not again that day.
+_watchdog_settled: set = set()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -121,8 +123,9 @@ def check_expected_runs(now_et: datetime | None = None):
     Notes:
       - Any job created since 09:30 ET satisfies the check, including a manual run
         or a failed job (failed jobs already alert on their own).
-      - Once per report per day per process. A worker restart later the same day
-        can re-alert once.
+      - Settles once per report per day per process: after the job is found, the
+        alert is sent, or the day is not a business day, it stops checking until
+        tomorrow. A worker restart later the same day can re-check (and re-alert) once.
       - A failure of the check itself is logged and retried next tick; it never
         marks the day as alerted.
     """
@@ -132,7 +135,7 @@ def check_expected_runs(now_et: datetime | None = None):
 
     for report_id, cal_loc, hh, mm in EXPECTED_AUTOMATED_RUNS:
         key = (report_id, today.isoformat())
-        if key in _missing_run_alerted:
+        if key in _watchdog_settled:
             continue
 
         deadline = now_et.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -141,6 +144,7 @@ def check_expected_runs(now_et: datetime | None = None):
 
         try:
             if not is_business_day(today, cal_loc):
+                _watchdog_settled.add(key)
                 continue
 
             since = now_et.replace(hour=9, minute=30, second=0, microsecond=0).astimezone(timezone.utc)
@@ -155,9 +159,10 @@ def check_expected_runs(now_et: datetime | None = None):
                 .execute()
             )
             if resp.data:
+                _watchdog_settled.add(key)   # job exists: done for today
                 continue
 
-            _missing_run_alerted.add(key)
+            _watchdog_settled.add(key)
             logging.error(
                 f"[watchdog] No {report_id} job exists for {today} as of "
                 f"{now_et.strftime('%H:%M %Z')} (deadline {hh:02d}:{mm:02d} ET). Alerting."
