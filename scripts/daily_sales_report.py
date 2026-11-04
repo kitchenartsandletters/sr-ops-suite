@@ -165,7 +165,7 @@ query Orders24h($first: Int!, $after: String, $query: String!) {
         channel {
           handle
         }
-        physicalLocation {
+        retailLocation {
           id
         }
         lineItems(first: 100) {
@@ -420,9 +420,10 @@ def aggregate_products(
                 if not custom_title or "cookbook club" in custom_title.lower():
                     continue
 
-                # Location filter for custom items
+                # Location filter for custom items. retailLocation (replaces the deprecated
+                # physicalLocation) is null for online orders, which belong to KAL.
                 if location_id:
-                    phys_loc     = (order.get("physicalLocation") or {}).get("id")
+                    phys_loc     = (order.get("retailLocation") or {}).get("id")
                     is_online    = phys_loc is None
                     if is_online and location_id != KAL_LOCATION_ID:
                         continue
@@ -457,7 +458,7 @@ def aggregate_products(
 
             # Location filter for regular products
             if location_id:
-                phys_loc  = (order.get("physicalLocation") or {}).get("id")
+                phys_loc  = (order.get("retailLocation") or {}).get("id")
                 is_online = phys_loc is None
                 if is_online and location_id != KAL_LOCATION_ID:
                     continue
