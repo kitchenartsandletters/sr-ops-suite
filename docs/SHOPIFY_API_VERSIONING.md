@@ -8,9 +8,12 @@ Incident history:
 - **2026-06-03** — report failed on a transient Shopify "Not Found"; led to `validate_connection()` and retries.
 - **2026-10-16 → 2026-11-04** — the worker kept requesting `2025-10` for 19 days after its end of access. Reports still ran; nothing flagged it. Led to the served-version check below.
 
-**Current version in use:** `2026-10` (set 2026-11-04, verified against a known report window)
+**This document covers the whole estate.** The procedure and drift detection below are written for sr-ops-suite, which is where they were built; the [inventory](#org-wide-inventory) is the list of every service that pins a version, because the 2026-10 incident happened in the one place nobody was watching and there are four more places like it.
+
+**sr-ops-suite version in use:** `2026-10` (set 2026-11-04, verified against a known report window)
 **Accessible until:** 2027-10-16 15:00 UTC
 **Bump by:** July 2027 (move to `2027-07`), and never later than 2027-10-16
+**Earliest cliff anywhere:** `2026-04` on campaign-service and supply-chain-service, 2027-04-16 15:00 UTC
 **Source of truth:** https://shopify.dev/docs/api/usage/versioning
 
 ---
@@ -31,9 +34,31 @@ Never run a release candidate in production.
 
 ---
 
-## Where the Version Is Used
+## Org-wide inventory
 
-**sr-ops-suite — one setting.** Every Shopify call goes through `ShopifyClient` in `scripts/shopify_client.py` (`lop_unfulfilled_report.py` re-imports it). The URL is built from:
+Every service that mints its own Admin API token and therefore pins its own version. Each row was read from the repo named, not inferred from another service's notes.
+
+| Service | Where the version is set | Version | Accessible until | Drift detection |
+|---------|--------------------------|---------|------------------|-----------------|
+| sr-ops-suite (report worker) | Railway `SHOPIFY_API_VERSION`; `scripts/shopify_client.py` `DEFAULT_API_VERSION` | `2026-10` | 2027-10-16 | `validate_connection()`, logs served version |
+| preorder-service | `shopify_version.py` `DEFAULT_SHOPIFY_API_VERSION`, env override | `2026-07` | 2027-07-16 | `scripts/smoke_shopify_api_version.py` (manual, pre-bump) |
+| request-service | `backend/app/shopify_version.py`, env override | `2026-07` | 2027-07-16 | none |
+| campaign-service | `app/config.py` `SHOPIFY_API_VERSION` default, env override | `2026-04` | 2027-04-16 | none |
+| supply-chain-service | `app/clients/shopify_token.py`, `SHOPIFY_API_VERSION` env (default in `.env.example`) | `2026-04` | 2027-04-16 | none |
+
+Only sr-ops-suite notices drift on its own. Everywhere else, this table and the quarterly check are the detection.
+
+**The 2026-04 pair is a coupled bump.** campaign-service and supply-chain-service move to `2026-10` together, and only after checking `InventoryItem.variants` usage in supply-chain-service — the reason they are pinned back is recorded in `campaign-service/app/config.py`, so change that comment if the reason changes.
+
+**Not checked, and worth confirming once:** webhook-gateway, backorder-service, edelweiss-service, damaged-books-service. The gateway verifies HMACs and forwards rather than querying the Admin API, so it may legitimately pin nothing; the others are unknown. Add a row or a note either way so the next person does not re-derive this.
+
+**admin-dashboard backend — none.** It no longer calls Shopify. The Shopify proxy (and the old hardcoded `2023-10`) moved to **request-service** (`api.kitchenartsandletters.com`). Any `SHOPIFY_API_VERSION` left on the dashboard service is dead and can be deleted.
+
+---
+
+## Where the Version Is Used (sr-ops-suite)
+
+**One setting.** Every Shopify call goes through `ShopifyClient` in `scripts/shopify_client.py` (`lop_unfulfilled_report.py` re-imports it). The URL is built from:
 
 | Where | Setting | Value |
 |-------|---------|-------|
@@ -41,10 +66,6 @@ Never run a release candidate in production.
 | `scripts/shopify_client.py` | `DEFAULT_API_VERSION` (fallback if the env var is unset) | `2026-10` |
 
 Keep these two equal. The cron/enqueue services do not call Shopify and need no version.
-
-**admin-dashboard backend — none.** It no longer calls Shopify. The Shopify proxy (and the old hardcoded `2023-10`) moved to **request-service** (`api.kitchenartsandletters.com`). Any `SHOPIFY_API_VERSION` left on the dashboard service is dead and can be deleted.
-
-**request-service — owns its own Shopify calls.** Not covered by this document; check its version separately on the same schedule.
 
 ---
 
@@ -57,6 +78,8 @@ On every job, `ShopifyClient.validate_connection()` records the `X-Shopify-API-V
 [shopify] Requested API version X but Shopify served Y.   <- WARNING: X is past end of life, bump now
 [shopify] Served API version not reported by Shopify.     <- header absent; check manually
 ```
+
+This runs in sr-ops-suite only. The other services in the inventory have no equivalent, so a version past end of access there degrades exactly the way `2025-10` did — silently, with everything still appearing to work. Worth porting the served-version check into the shared Shopify client in each service; until then the quarterly walk is the only guard.
 
 ---
 
@@ -76,7 +99,9 @@ Run once per year at minimum (or when Shopify emails about a deprecation). Shopi
      '{"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD","delivery_method":"table","formats":["pdf","csv"],"test":"API bump"}');
    ```
 5. **Check the worker log** for `[shopify] Served API version: <target>`.
-6. **Update this document** (current version, accessible-until, bump-by, lifecycle table).
+6. **Update this document** (current version, accessible-until, bump-by, lifecycle table, and the inventory row).
+
+Steps 1, 2 and 6 apply to any service in the inventory. Steps 3 to 5 are sr-ops-suite's; each other service verifies its own way, and preorder-service has `scripts/smoke_shopify_api_version.py` for exactly this.
 
 ### Deprecation watch list
 
@@ -84,6 +109,7 @@ Run once per year at minimum (or when Shopify emails about a deprecation). Shopi
 |-------|--------|------|
 | `Order.physicalLocation` | Deprecated | Replaced by `Order.retailLocation` (2026-11-04) |
 | `Order.channel` | Deprecated, still present in 2026-10 | Used only as a secondary online-sale signal next to `sourceName`. Re-check at the 2027 bump; replace or drop before it is removed. |
+| `OrderCreateOrderInput.customerId` | Deprecated | Replaced by `customer { toAssociate { id } }` in campaign-service (2026-11-17). Grep for `customerId` before the next bump. |
 
 Any new code that builds a Shopify URL must go through `ShopifyClient`; never hardcode a version string.
 
@@ -96,6 +122,7 @@ Any new code that builds a Shopify URL must go through `ShopifyClient`; never ha
 | `WARNING Requested API version X but Shopify served Y` | X is past end of life — bump now |
 | `Shopify GraphQL error: Not Found` | Version unavailable or wrong `SHOP_URL` |
 | `Shopify GraphQL error: [... field ... doesn't exist ...]` | A field we query was removed in this version |
+| `Field X is not defined by type Y` on a mutation input | The field never existed on that input, or was removed. Check the input object's reference page before assuming a version problem |
 | Report runs but data looks wrong | Response shape changed; compare against a known window (step 4) |
 | `Shopify token request failed: status=400/401` | `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET` wrong or rotated, or the app was uninstalled (`SHOPIFY_ACCESS_TOKEN` is retired and unused) |
 
@@ -105,5 +132,6 @@ Job failures email `EMAIL_RECIPIENTS`; a missing daily job is caught by the work
 
 ## Calendar Reminders
 
-- **July 2027:** bump to `2027-07` (procedure above).
-- **Each January, April, July, October:** 5-minute check of the versioning page for anything we use that is deprecated.
+- **April 2027:** campaign-service and supply-chain-service lose access to `2026-04` on 2027-04-16. Bump the pair together (see the inventory note) well before then.
+- **July 2027:** preorder-service and request-service lose `2026-07` on 2027-07-16; sr-ops-suite bumps to `2027-07`.
+- **Each January, April, July, October:** 5-minute check of the versioning page for anything we use that is deprecated, **and walk the inventory table** — confirm each row still matches what the service actually sends, and that nothing new calls Shopify without a row.
